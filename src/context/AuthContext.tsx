@@ -11,6 +11,7 @@ interface AuthContextType {
   currentUser: UserProfile | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInAsTestPeer: (name?: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateDisplayName: (newName: string) => Promise<boolean>;
   updateLocalAvatar: (avatarDataUrl: string) => Promise<void>;
@@ -89,6 +90,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await supabaseService.signInWithGoogle();
   };
 
+  const signInAsTestPeer = async (name?: string) => {
+    await supabaseService.signInAsTestPeer(name);
+  };
+
   const signOut = async () => {
     await supabaseService.signOut();
     signalingService.cleanup();
@@ -117,6 +122,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUser,
       loading,
       signInWithGoogle,
+      signInAsTestPeer,
       signOut,
       updateDisplayName,
       updateLocalAvatar

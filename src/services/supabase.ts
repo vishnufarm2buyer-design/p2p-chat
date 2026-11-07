@@ -79,6 +79,45 @@ class SupabaseService {
     }
   }
 
+  async signInAsTestPeer(name?: string): Promise<{ error: Error | null }> {
+    if (!isConfigured) {
+      const randSuffix = Math.random().toString(36).substring(2, 8);
+      const user: UserProfile = {
+        id: 'demo-user-' + randSuffix,
+        public_id: 'p2p_' + randSuffix,
+        display_name: name || ('Peer ' + randSuffix.toUpperCase()),
+        created_at: new Date().toISOString()
+      };
+      localStorage.setItem('p2p_demo_user', JSON.stringify(user));
+      window.location.reload();
+      return { error: null };
+    }
+
+    try {
+      const { error } = await supabase.auth.signInAnonymously();
+      if (error) {
+        const randId = Math.random().toString(36).substring(2, 10);
+        const testEmail = `peer_${randId}@p2p.internal`;
+        const testPassword = 'P2P_Shield_' + randId;
+        const res = await supabase.auth.signUp({
+          email: testEmail,
+          password: testPassword,
+          options: {
+            data: {
+              full_name: name || ('Peer ' + randId.substring(0, 4).toUpperCase())
+            }
+          }
+        });
+        if (res.error) {
+          return { error: new Error(res.error.message) };
+        }
+      }
+      return { error: null };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err : new Error('Test sign-in failed') };
+    }
+  }
+
   async signOut(): Promise<void> {
     localStorage.removeItem('p2p_demo_user');
     if (isConfigured) {
@@ -568,12 +607,21 @@ class SupabaseService {
   // Mock/Sandbox helpers (for instant testing prior to user's env configuration)
   // --------------------------------------------------------------------------
   private getMockDemoUser(): UserProfile {
-    return {
-      id: 'demo-local-user',
-      public_id: 'p2p_demo_me',
-      display_name: 'You (Local Peer)',
+    const stored = localStorage.getItem('p2p_demo_user');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (_) {}
+    }
+    const randSuffix = Math.random().toString(36).substring(2, 8);
+    const user: UserProfile = {
+      id: 'demo-user-' + randSuffix,
+      public_id: 'p2p_' + randSuffix,
+      display_name: 'Peer ' + randSuffix.toUpperCase(),
       created_at: new Date().toISOString()
     };
+    localStorage.setItem('p2p_demo_user', JSON.stringify(user));
+    return user;
   }
 
   private getDefaultDemoContacts(): ContactItem[] {

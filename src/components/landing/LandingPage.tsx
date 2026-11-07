@@ -14,7 +14,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 
 export const LandingPage: React.FC = () => {
-  const { signInWithGoogle } = useAuth();
+  const { signInWithGoogle, signInAsTestPeer } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -56,19 +56,26 @@ export const LandingPage: React.FC = () => {
         </p>
 
         {/* Call to Action */}
-        <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto mb-16">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto mb-16">
           <button
             onClick={signInWithGoogle}
-            className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 font-bold text-base rounded-2xl transition-all shadow-xl shadow-cyan-500/25 flex items-center justify-center gap-3 cursor-pointer"
+            className="w-full sm:w-auto px-7 py-3.5 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 font-bold text-sm rounded-2xl transition-all shadow-xl shadow-cyan-500/25 flex items-center justify-center gap-2.5 cursor-pointer"
           >
-            <ShieldCheck className="w-5 h-5" />
-            Get Started with Google OAuth
+            <ShieldCheck className="w-4 h-4" />
+            Sign In with Google
+          </button>
+          <button
+            onClick={() => signInAsTestPeer()}
+            className="w-full sm:w-auto px-5 py-3.5 bg-slate-900 hover:bg-slate-800 text-cyan-300 font-semibold text-sm rounded-2xl border border-cyan-800/60 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            title="Instant Test Peer (No Google credentials required for quick testing)"
+          >
+            Instant Peer Test Sign-In
           </button>
           <a
             href="#architecture"
-            className="w-full sm:w-auto px-6 py-4 bg-slate-900 hover:bg-slate-800 text-slate-200 font-medium text-sm rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-5 py-3.5 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-white font-medium text-xs rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-1.5"
           >
-            Explore Architecture
+            Architecture
           </a>
         </div>
 
