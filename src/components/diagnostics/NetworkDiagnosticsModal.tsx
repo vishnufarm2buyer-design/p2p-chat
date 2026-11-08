@@ -109,7 +109,7 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Network &amp; STUN Diagnostics</h3>
-              <p className="text-xs text-slate-400">Real-time WebRTC NAT Traversal &amp; LAN Check</p>
+              <p className="text-xs text-slate-400">Real-time WebRTC NAT Traversal &amp; STUN Diagnostics</p>
             </div>
           </div>
           <button
@@ -159,15 +159,13 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
             </div>
           </div>
 
-          {/* LAN Discovery Notice */}
+          {/* Direct STUN P2P Traversal Notice */}
           <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-start gap-3">
-            <Zap className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <Globe className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="text-xs font-bold text-cyan-300">Direct Local LAN Discovery</p>
+              <p className="text-xs font-bold text-cyan-300">Direct STUN P2P Traversal</p>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                {hasHostCandidate 
-                  ? 'Local network host candidates available. If your peer is connected to the same Wi-Fi, connection occurs instantly over your LAN at gigabit speeds with zero internet bandwidth.'
-                  : 'Host candidates are being discovered for local network connectivity.'}
+                STUN servers discover public reflexive endpoints across NAT and firewalls to establish direct, end-to-end encrypted peer-to-peer connections with zero intermediary servers or cloud message storage.
               </p>
             </div>
           </div>

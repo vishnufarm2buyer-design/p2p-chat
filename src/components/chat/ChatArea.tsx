@@ -43,14 +43,12 @@ export const ChatArea: React.FC<Record<string, any>> = () => {
     startCall, 
     retryPeerConnection, 
     deleteContact, 
-    blockContact,
-    getConnectionType
+    blockContact
   } = useChat();
 
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [showMenu, setShowMenu] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
-  const [connectionType, setConnectionType] = useState<'lan' | 'stun' | 'offline'>('offline');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -102,19 +100,6 @@ export const ChatArea: React.FC<Record<string, any>> = () => {
       unbind();
     };
   }, [contactId]);
-
-  // Query WebRTC active candidate pair for LAN vs STUN WAN discovery
-  useEffect(() => {
-    if (connectionStatus === 'connected' && contactId) {
-      getConnectionType(contactId).then(setConnectionType);
-      const iv = setInterval(() => {
-        getConnectionType(contactId).then(setConnectionType);
-      }, 5000);
-      return () => clearInterval(iv);
-    } else {
-      setConnectionType('offline');
-    }
-  }, [connectionStatus, contactId, getConnectionType]);
 
   // Auto-scroll on new messages or typing updates
   useEffect(() => {
@@ -258,20 +243,13 @@ export const ChatArea: React.FC<Record<string, any>> = () => {
               )}
             </div>
 
-            {/* Connection Status & LAN / WAN discovery pill */}
+            {/* Connection Status */}
             <div className="flex items-center gap-2 text-xs">
               {isConnected && (
-                connectionType === 'lan' ? (
-                  <span className="text-cyan-300 font-bold text-[11px] flex items-center gap-1">
-                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                    Direct LAN (Zero Latency)
-                  </span>
-                ) : (
-                  <span className="text-emerald-400 font-medium text-[11px] flex items-center gap-1">
-                    <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                    Direct WAN (STUN)
-                  </span>
-                )
+                <span className="text-emerald-400 font-medium text-[11px] flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                  Direct P2P (STUN)
+                </span>
               )}
 
               {isConnecting && (

@@ -74,7 +74,6 @@ interface ChatContextType {
   toggleVideo: () => boolean;
   flipCamera: () => Promise<boolean>;
   toggleScreenShare: () => Promise<boolean>;
-  getConnectionType: (peerUserId: string) => Promise<'lan' | 'stun' | 'offline'>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -440,10 +439,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return await peerManager.toggleScreenShare();
   }, []);
 
-  const getConnectionType = useCallback(async (peerUserId: string) => {
-    return await peerManager.getConnectionType(peerUserId);
-  }, []);
-
   return (
     <ChatContext.Provider value={{
       contacts,
@@ -483,8 +478,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       toggleMute,
       toggleVideo,
       flipCamera,
-      toggleScreenShare,
-      getConnectionType
+      toggleScreenShare
     }}>
       {children}
     </ChatContext.Provider>

@@ -1192,31 +1192,6 @@ class PeerConnectionManager {
     }
   }
 
-  async getConnectionType(peerUserId: string): Promise<'lan' | 'stun' | 'offline'> {
-    const session = this.peers.get(peerUserId);
-    if (!session || session.status !== 'connected' || !session.pc) return 'offline';
-
-    try {
-      const stats = await session.pc.getStats();
-      let isHostPair = false;
-      stats.forEach(report => {
-        if (
-          report.type === 'candidate-pair' &&
-          (report.state === 'succeeded' || report.nominated)
-        ) {
-          const localCand = stats.get(report.localCandidateId);
-          const remoteCand = stats.get(report.remoteCandidateId);
-          if (localCand?.candidateType === 'host' && remoteCand?.candidateType === 'host') {
-            isHostPair = true;
-          }
-        }
-      });
-      return isHostPair ? 'lan' : 'stun';
-    } catch {
-      return 'stun';
-    }
-  }
-
   getLocalMediaStream(): MediaStream | null {
     return this.localMediaStream;
   }
