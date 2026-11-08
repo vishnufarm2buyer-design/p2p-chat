@@ -27,6 +27,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
+    // Safety fallback: Never keep user stuck on loading splash for more than 2.5s
+    const safetyTimer = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 2500);
+
     async function initAuth() {
       try {
         const user = await supabaseService.getCurrentSessionUser();
@@ -38,24 +43,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           setCurrentUser(user);
+          setLoading(false); // Unblock UI immediately!
 
-          // 1. Initialize or load device cryptographic keypair (ECDH P-256)
-          const { publicKeyJWK } = await cryptoService.getOrCreateDeviceKeypair();
+          // Run device crypto & WebRTC signaling in background without blocking UI
+          cryptoService.getOrCreateDeviceKeypair().then(({ publicKeyJWK }) => {
+            supabaseService.publishPublicKey(user.id, publicKeyJWK).catch(console.warn);
+          }).catch(console.warn);
 
-          // 2. Publish public key to Supabase (public identity table)
-          await supabaseService.publishPublicKey(user.id, publicKeyJWK);
-
-          // 3. Initialize Ephemeral WebRTC Signaling and Presence
-          await signalingService.init(user.id, user.public_id, user.display_name);
-
-          // 4. Initialize Peer Manager & Mesh Manager
+          signalingService.init(user.id, user.public_id, user.display_name).catch(console.warn);
           peerManager.init(user.id, user.display_name);
           groupMeshManager.init(user.id, user.display_name);
+        } else if (mounted) {
+          setLoading(false);
         }
       } catch (err) {
         console.error('Error during auth initialization:', err);
       } finally {
         if (mounted) setLoading(false);
+        clearTimeout(safetyTimer);
       }
     }
 
@@ -69,12 +74,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const localAvatar = await localDb.getSetting<string>('my_avatar');
           if (localAvatar) user.avatar_data = localAvatar;
           setCurrentUser(user);
-          await signalingService.init(user.id, user.public_id, user.display_name);
+          setLoading(false);
+          signalingService.init(user.id, user.public_id, user.display_name).catch(console.warn);
           peerManager.init(user.id, user.display_name);
           groupMeshManager.init(user.id, user.display_name);
         }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
+        setLoading(false);
         signalingService.cleanup();
         peerManager.cleanup();
       }
