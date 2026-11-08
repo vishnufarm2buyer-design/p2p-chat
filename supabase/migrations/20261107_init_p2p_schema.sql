@@ -1,5 +1,5 @@
 -- ============================================================================
--- P2P Privacy-Focused Messaging Database Schema
+-- P2P Privacy-Focused Messaging Database Schema (Fully Idempotent & Safe)
 -- Architecture Principle: "The server connects people; their devices communicate."
 -- NO chat messages, media, or file storage tables are created.
 -- ============================================================================
@@ -26,23 +26,22 @@ CREATE INDEX IF NOT EXISTS idx_profiles_public_id ON public.profiles(public_id);
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- Profiles RLS Policies:
--- Any authenticated user can view public profile info (id, public_id, display_name, created_at)
--- Notice: No email or private data exists in public.profiles.
+-- Profiles RLS Policies
+DROP POLICY IF EXISTS "Public profiles are readable by authenticated users" ON public.profiles;
 CREATE POLICY "Public profiles are readable by authenticated users"
     ON public.profiles
     FOR SELECT
     TO authenticated
     USING (true);
 
--- Users can only insert their own profile
+DROP POLICY IF EXISTS "Users can create their own profile" ON public.profiles;
 CREATE POLICY "Users can create their own profile"
     ON public.profiles
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = id);
 
--- Users can only update their own profile display name
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
     ON public.profiles
     FOR UPDATE
@@ -57,7 +56,7 @@ CREATE POLICY "Users can update their own profile"
 -- PRIVATE KEYS NEVER LEAVE THE CLIENT DEVICE.
 CREATE TABLE IF NOT EXISTS public.public_keys (
     user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
-    public_key TEXT NOT NULL, -- Exported JWK or SPKI public key string
+    public_key TEXT NOT NULL,
     key_version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
@@ -65,18 +64,21 @@ CREATE TABLE IF NOT EXISTS public.public_keys (
 
 ALTER TABLE public.public_keys ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public keys are readable by authenticated users" ON public.public_keys;
 CREATE POLICY "Public keys are readable by authenticated users"
     ON public.public_keys
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own public key" ON public.public_keys;
 CREATE POLICY "Users can insert their own public key"
     ON public.public_keys
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update their own public key" ON public.public_keys;
 CREATE POLICY "Users can update their own public key"
     ON public.public_keys
     FOR UPDATE
@@ -103,21 +105,21 @@ CREATE INDEX IF NOT EXISTS idx_contact_requests_sender ON public.contact_request
 
 ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
 
--- Users can view requests where they are either sender or receiver
+DROP POLICY IF EXISTS "Users can view their own contact requests" ON public.contact_requests;
 CREATE POLICY "Users can view their own contact requests"
     ON public.contact_requests
     FOR SELECT
     TO authenticated
     USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 
--- Senders can create requests
+DROP POLICY IF EXISTS "Users can send contact requests" ON public.contact_requests;
 CREATE POLICY "Users can send contact requests"
     ON public.contact_requests
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = sender_id);
 
--- Both sender and receiver can update status (sender cancels, receiver accepts/rejects)
+DROP POLICY IF EXISTS "Users can update requests concerning them" ON public.contact_requests;
 CREATE POLICY "Users can update requests concerning them"
     ON public.contact_requests
     FOR UPDATE
@@ -142,21 +144,21 @@ CREATE INDEX IF NOT EXISTS idx_contacts_contact_id ON public.contacts(contact_id
 
 ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
 
--- Users can only view their own contacts
+DROP POLICY IF EXISTS "Users can view their contact relationships" ON public.contacts;
 CREATE POLICY "Users can view their contact relationships"
     ON public.contacts
     FOR SELECT
     TO authenticated
     USING (auth.uid() = user_id);
 
--- Users can insert contacts for themselves (or through acceptance trigger/logic)
+DROP POLICY IF EXISTS "Users can insert their own contacts" ON public.contacts;
 CREATE POLICY "Users can insert their own contacts"
     ON public.contacts
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
--- Users can remove a contact
+DROP POLICY IF EXISTS "Users can delete their own contacts" ON public.contacts;
 CREATE POLICY "Users can delete their own contacts"
     ON public.contacts
     FOR DELETE
@@ -166,7 +168,6 @@ CREATE POLICY "Users can delete their own contacts"
 -- ----------------------------------------------------------------------------
 -- 5. GROUPS & GROUP MEMBERS (Mesh coordination metadata only)
 -- ----------------------------------------------------------------------------
--- Notice: NO group messages are stored. Only group name, creator, and membership.
 CREATE TABLE IF NOT EXISTS public.groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -191,7 +192,8 @@ CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON public.group_members(use
 
 ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
 
--- Group RLS:
+-- Group RLS Policies
+DROP POLICY IF EXISTS "Group members can view group metadata" ON public.groups;
 CREATE POLICY "Group members can view group metadata"
     ON public.groups
     FOR SELECT
@@ -204,19 +206,22 @@ CREATE POLICY "Group members can view group metadata"
         ) OR creator_id = auth.uid()
     );
 
+DROP POLICY IF EXISTS "Authenticated users can create groups" ON public.groups;
 CREATE POLICY "Authenticated users can create groups"
     ON public.groups
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = creator_id);
 
+DROP POLICY IF EXISTS "Group creator can update group" ON public.groups;
 CREATE POLICY "Group creator can update group"
     ON public.groups
     FOR UPDATE
     TO authenticated
     USING (auth.uid() = creator_id);
 
--- Group Members RLS:
+-- Group Members RLS Policies
+DROP POLICY IF EXISTS "Users can view memberships for groups they belong to" ON public.group_members;
 CREATE POLICY "Users can view memberships for groups they belong to"
     ON public.group_members
     FOR SELECT
@@ -230,6 +235,7 @@ CREATE POLICY "Users can view memberships for groups they belong to"
         )
     );
 
+DROP POLICY IF EXISTS "Group creators or members can invite users" ON public.group_members;
 CREATE POLICY "Group creators or members can invite users"
     ON public.group_members
     FOR INSERT
@@ -241,6 +247,7 @@ CREATE POLICY "Group creators or members can invite users"
         ) OR user_id = auth.uid()
     );
 
+DROP POLICY IF EXISTS "Members can update their own status or host can manage" ON public.group_members;
 CREATE POLICY "Members can update their own status or host can manage"
     ON public.group_members
     FOR UPDATE
@@ -253,6 +260,7 @@ CREATE POLICY "Members can update their own status or host can manage"
         )
     );
 
+DROP POLICY IF EXISTS "Members can leave or host can remove" ON public.group_members;
 CREATE POLICY "Members can leave or host can remove"
     ON public.group_members
     FOR DELETE
@@ -268,18 +276,14 @@ CREATE POLICY "Members can leave or host can remove"
 -- ----------------------------------------------------------------------------
 -- 6. AUTOMATIC PROFILE CREATION TRIGGER ON SIGNUP
 -- ----------------------------------------------------------------------------
--- Automatically generates a permanent unique public_id (e.g., p2p_xxxx8chars)
--- and populates display_name from user_metadata if available.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
     new_public_id TEXT;
     extracted_name TEXT;
 BEGIN
-    -- Generate permanent unique public ID with 'p2p_' prefix and 10 random lowercase alphanumeric chars
     new_public_id := 'p2p_' || lower(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
     
-    -- Extract display name from metadata or default to User_ID
     extracted_name := COALESCE(
         NEW.raw_user_meta_data->>'full_name',
         NEW.raw_user_meta_data->>'name',
@@ -294,13 +298,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger to execute upon auth.users insertion
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- Enable Supabase Realtime for table changes required for real-time contact updates
-ALTER PUBLICATION supabase_realtime ADD TABLE public.contact_requests;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.contacts;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.group_members;
+-- ----------------------------------------------------------------------------
+-- 7. ENABLE REALTIME SAFELY (Checks existing publication members)
+-- ----------------------------------------------------------------------------
+DO $$
+BEGIN
+    -- Ensure publication exists
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+        CREATE PUBLICATION supabase_realtime;
+    END IF;
+
+    -- Add contact_requests if not already present
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'contact_requests'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.contact_requests;
+    END IF;
+
+    -- Add contacts if not already present
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'contacts'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.contacts;
+    END IF;
+
+    -- Add group_members if not already present
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'group_members'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.group_members;
+    END IF;
+END $$;
