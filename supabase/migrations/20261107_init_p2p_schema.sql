@@ -151,7 +151,32 @@ CREATE POLICY "Users can insert their own contacts"
     ON public.contacts
     FOR INSERT
     TO authenticated
-    WITH CHECK (auth.uid() = user_id);
+    WITH CHECK (auth.uid() = user_id OR auth.uid() = contact_id);
+
+-- Trigger to automatically insert bidirectional contacts when request is accepted
+CREATE OR REPLACE FUNCTION public.handle_contact_request_acceptance()
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+AS $$
+BEGIN
+    IF NEW.status = 'accepted' THEN
+        INSERT INTO public.contacts (user_id, contact_id)
+        VALUES 
+            (NEW.sender_id, NEW.receiver_id),
+            (NEW.receiver_id, NEW.sender_id)
+        ON CONFLICT (user_id, contact_id) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_contact_request_accepted ON public.contact_requests;
+CREATE TRIGGER on_contact_request_accepted
+    AFTER UPDATE ON public.contact_requests
+    FOR EACH ROW
+    WHEN (NEW.status = 'accepted')
+    EXECUTE FUNCTION public.handle_contact_request_acceptance();
 
 DROP POLICY IF EXISTS "Users can delete their own contacts" ON public.contacts;
 CREATE POLICY "Users can delete their own contacts"

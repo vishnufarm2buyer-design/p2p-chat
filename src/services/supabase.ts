@@ -292,28 +292,37 @@ class SupabaseService {
       return raw ? JSON.parse(raw) : this.getDefaultDemoContacts();
     }
 
-    const { data, error } = await supabase
+    const { data: contactsData, error: contactsError } = await supabase
       .from('contacts')
-      .select(`
-        id,
-        user_id,
-        contact_id,
-        created_at,
-        contact_profile:profiles!contacts_contact_id_fkey(id, public_id, display_name, created_at)
-      `)
+      .select('id, user_id, contact_id, created_at')
       .eq('user_id', currentUserId);
 
-    if (error) {
-      console.error('Error fetching contacts:', error);
+    if (contactsError || !contactsData) {
+      console.error('Error fetching contacts:', contactsError);
       return [];
     }
 
-    return (data || []).map((row: any) => ({
+    if (contactsData.length === 0) return [];
+
+    const contactIds = contactsData.map(c => c.contact_id);
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, public_id, display_name, created_at')
+      .in('id', contactIds);
+
+    const profileMap = new Map((profilesData || []).map(p => [p.id, p]));
+
+    return contactsData.map(row => ({
       id: row.id,
       user_id: row.user_id,
       contact_id: row.contact_id,
       created_at: row.created_at,
-      profile: row.contact_profile as UserProfile,
+      profile: (profileMap.get(row.contact_id) || {
+        id: row.contact_id,
+        public_id: 'p2p_' + row.contact_id.substring(0, 8),
+        display_name: 'Peer Contact',
+        created_at: row.created_at
+      }) as UserProfile,
       presence: 'offline',
       connectionStatus: 'idle'
     }));
@@ -334,28 +343,32 @@ class SupabaseService {
 
     const { data, error } = await supabase
       .from('contact_requests')
-      .select(`
-        id,
-        sender_id,
-        receiver_id,
-        status,
-        created_at,
-        updated_at,
-        sender_profile:profiles!contact_requests_sender_id_fkey(id, public_id, display_name, created_at),
-        receiver_profile:profiles!contact_requests_receiver_id_fkey(id, public_id, display_name, created_at)
-      `)
+      .select('id, sender_id, receiver_id, status, created_at, updated_at')
       .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
       .eq('status', 'pending');
 
-    if (error) {
+    if (error || !data) {
       console.error('Error fetching contact requests:', error);
       return { incoming: [], outgoing: [] };
     }
 
+    const userIds = new Set<string>();
+    for (const r of data) {
+      userIds.add(r.sender_id);
+      userIds.add(r.receiver_id);
+    }
+
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, public_id, display_name, created_at')
+      .in('id', Array.from(userIds));
+
+    const profileMap = new Map((profilesData || []).map(p => [p.id, p]));
+
     const incoming: ContactRequest[] = [];
     const outgoing: ContactRequest[] = [];
 
-    for (const req of (data || [])) {
+    for (const req of data) {
       const item: ContactRequest = {
         id: req.id,
         sender_id: req.sender_id,
@@ -363,8 +376,8 @@ class SupabaseService {
         status: req.status,
         created_at: req.created_at,
         updated_at: req.updated_at,
-        sender_profile: (req as any).sender_profile,
-        receiver_profile: (req as any).receiver_profile
+        sender_profile: profileMap.get(req.sender_id) as UserProfile,
+        receiver_profile: profileMap.get(req.receiver_id) as UserProfile
       };
 
       if (req.receiver_id === currentUserId) {

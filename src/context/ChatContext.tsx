@@ -110,6 +110,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       refreshContacts();
       refreshRequests();
       refreshGroups();
+
+      // Keep contacts and incoming/outgoing requests continuously synchronized
+      const syncInterval = setInterval(() => {
+        refreshContacts();
+        refreshRequests();
+      }, 2500);
+
+      return () => clearInterval(syncInterval);
     }
   }, [currentUser, refreshContacts, refreshRequests, refreshGroups]);
 
