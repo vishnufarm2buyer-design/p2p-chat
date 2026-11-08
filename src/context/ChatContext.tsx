@@ -43,9 +43,18 @@ interface ChatContextType {
   refreshContacts: () => Promise<void>;
   refreshRequests: () => Promise<void>;
   refreshGroups: () => Promise<void>;
-  sendContactRequestByPublicId: (publicId: string) => Promise<{ success: boolean; error?: string }>;
+  sendContactRequestByPublicId: (publicId: string) => Promise<{ 
+    success: boolean; 
+    error?: string; 
+    autoAccepted?: boolean; 
+    alreadyContact?: boolean;
+    isPending?: boolean;
+    message?: string;
+    targetProfile?: UserProfile;
+  }>;
   acceptRequest: (req: ContactRequest) => Promise<boolean>;
   rejectRequest: (req: ContactRequest) => Promise<boolean>;
+  cancelRequest: (req: ContactRequest) => Promise<boolean>;
   deleteContact: (contactId: string) => Promise<boolean>;
   blockContact: (contactId: string) => Promise<boolean>;
   unblockContact: (contactId: string) => Promise<boolean>;
@@ -307,11 +316,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const result = await supabaseService.sendContactRequest(currentUser.id, targetProfile.id);
-    if (result.success) {
-      refreshRequests();
-    }
-    return result;
-  }, [currentUser, refreshRequests]);
+    await refreshContacts();
+    await refreshRequests();
+    return { ...result, targetProfile };
+  }, [currentUser, refreshContacts, refreshRequests]);
 
   const acceptRequest = useCallback(async (req: ContactRequest): Promise<boolean> => {
     const ok = await supabaseService.acceptContactRequest(req.id, req.sender_id, req.receiver_id);
@@ -324,6 +332,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const rejectRequest = useCallback(async (req: ContactRequest): Promise<boolean> => {
     const ok = await supabaseService.rejectContactRequest(req.id);
+    if (ok) {
+      await refreshRequests();
+    }
+    return ok;
+  }, [refreshRequests]);
+
+  const cancelRequest = useCallback(async (req: ContactRequest): Promise<boolean> => {
+    const ok = await supabaseService.cancelContactRequest(req.id);
     if (ok) {
       await refreshRequests();
     }
@@ -369,11 +385,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [currentUser, selectedChat, refreshBlockedUsers, refreshContacts]);
 
   const unblockContact = useCallback(async (contactId: string): Promise<boolean> => {
+    if (currentUser) {
+      await supabaseService.unblockContact(currentUser.id, contactId);
+    }
     await localDb.unblockUser(contactId);
     await refreshBlockedUsers();
     await refreshContacts();
     return true;
-  }, [refreshBlockedUsers, refreshContacts]);
+  }, [currentUser, refreshBlockedUsers, refreshContacts]);
 
   const createGroup = useCallback(async (name: string, memberIds: string[]): Promise<GroupItem | null> => {
     if (!currentUser) return null;
@@ -447,6 +466,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sendContactRequestByPublicId,
       acceptRequest,
       rejectRequest,
+      cancelRequest,
       deleteContact,
       blockContact,
       unblockContact,

@@ -58,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     refreshContacts,
     deleteContact,
     blockContact,
+    blockedUsers,
     startCall,
   } = useChat();
 
@@ -293,6 +294,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span>Online ({contacts.filter(c => onlineUsers.has(c.contact_id)).length})</span>
             </button>
+            {blockedUsers.length > 0 && (
+              <button
+                onClick={onOpenPrivacy}
+                className="ml-auto px-2 py-0.5 rounded-lg text-[10px] font-medium bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer flex items-center gap-1"
+                title="Manage Blocked Contacts"
+              >
+                <Ban className="w-2.5 h-2.5" />
+                <span>{blockedUsers.length} Blocked</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -561,13 +572,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Activity className="w-4 h-4" />
           </button>
 
-          {/* Privacy Architecture Info */}
+          {/* Privacy Architecture Info & Blocked Contacts */}
           <button
             onClick={onOpenPrivacy}
-            title="Privacy Transparency & Architecture"
-            className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
+            title={blockedUsers.length > 0 ? `Privacy & Blocked Contacts (${blockedUsers.length} blocked)` : "Privacy Transparency & Architecture"}
+            className="relative p-2 text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
           >
             <Info className="w-4 h-4" />
+            {blockedUsers.length > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-pulse" />
+            )}
           </button>
 
           {/* Sign Out */}

@@ -34,7 +34,7 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
   onOpenDiagnostics
 }) => {
   const { currentUser, signOut } = useAuth();
-  const { contactRequests } = useChat();
+  const { contactRequests, blockedUsers } = useChat();
 
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -173,13 +173,16 @@ export const NavigationRail: React.FC<NavigationRailProps> = ({
           <Activity className="w-5 h-5" />
         </button>
 
-        {/* Privacy Architecture Transparency */}
+        {/* Privacy Architecture Transparency & Blocked Contacts */}
         <button
           onClick={onOpenPrivacy}
-          className="p-3 rounded-2xl text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] transition-all cursor-pointer"
-          title="Privacy Architecture & Blocked List"
+          className="relative p-3 rounded-2xl text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] transition-all cursor-pointer"
+          title={blockedUsers.length > 0 ? `Privacy Architecture & Blocked Contacts (${blockedUsers.length} blocked)` : "Privacy Architecture & Blocked List"}
         >
           <Info className="w-5 h-5" />
+          {blockedUsers.length > 0 && (
+            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-slate-950 animate-pulse" />
+          )}
         </button>
 
         <div className="w-8 h-[1px] bg-white/[0.08] my-1" />

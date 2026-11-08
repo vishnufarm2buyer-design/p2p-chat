@@ -124,6 +124,13 @@ CREATE POLICY "Users can update requests concerning them"
     USING (auth.uid() = sender_id OR auth.uid() = receiver_id)
     WITH CHECK (auth.uid() = sender_id OR auth.uid() = receiver_id);
 
+DROP POLICY IF EXISTS "Users can delete requests concerning them" ON public.contact_requests;
+CREATE POLICY "Users can delete requests concerning them"
+    ON public.contact_requests
+    FOR DELETE
+    TO authenticated
+    USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+
 -- ----------------------------------------------------------------------------
 -- 4. CONTACTS TABLE (Established bidirectional relationships)
 -- ----------------------------------------------------------------------------
@@ -179,11 +186,12 @@ CREATE TRIGGER on_contact_request_accepted
     EXECUTE FUNCTION public.handle_contact_request_acceptance();
 
 DROP POLICY IF EXISTS "Users can delete their own contacts" ON public.contacts;
-CREATE POLICY "Users can delete their own contacts"
+DROP POLICY IF EXISTS "Users can delete contacts concerning them" ON public.contacts;
+CREATE POLICY "Users can delete contacts concerning them"
     ON public.contacts
     FOR DELETE
     TO authenticated
-    USING (auth.uid() = user_id);
+    USING (auth.uid() = user_id OR auth.uid() = contact_id);
 
 -- ----------------------------------------------------------------------------
 -- 5. GROUPS & GROUP MEMBERS (Mesh coordination metadata only)

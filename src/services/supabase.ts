@@ -34,6 +34,16 @@ export const isConfigured = Boolean(
   !supabaseAnonKey.includes('placeholder')
 );
 
+class NodeWebSocketMock {
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+  readyState = 1;
+  addEventListener() {}
+  removeEventListener() {}
+  send() {}
+  close() {}
+}
+
 export const supabase: SupabaseClient = createClient(
   supabaseUrl || 'https://sample-p2p-project.supabase.co',
   supabaseAnonKey || 'placeholder',
@@ -44,6 +54,7 @@ export const supabase: SupabaseClient = createClient(
       detectSessionInUrl: true
     },
     realtime: {
+      transport: typeof window !== 'undefined' ? undefined : (NodeWebSocketMock as any),
       params: {
         eventsPerSecond: 20
       }
@@ -304,7 +315,35 @@ class SupabaseService {
 
     if (contactsData.length === 0) return [];
 
-    const contactIds = contactsData.map(c => c.contact_id);
+    // Query contact requests involving this user to detect if a relationship was canceled/rejected
+    const { data: requestsData } = await supabase
+      .from('contact_requests')
+      .select('sender_id, receiver_id, status')
+      .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`);
+
+    const canceledOrRejectedPeers = new Set<string>();
+    if (requestsData) {
+      for (const req of requestsData) {
+        if (req.status === 'canceled' || req.status === 'rejected') {
+          const otherId = req.sender_id === currentUserId ? req.receiver_id : req.sender_id;
+          canceledOrRejectedPeers.add(otherId);
+        }
+      }
+    }
+
+    // Filter out canceled contacts and self-heal the database row by removing orphaned contacts
+    const validContactsData = contactsData.filter(row => {
+      if (canceledOrRejectedPeers.has(row.contact_id)) {
+        // Asynchronously clean up stale orphan row from contacts table
+        supabase.from('contacts').delete().eq('user_id', currentUserId).eq('contact_id', row.contact_id).then();
+        return false;
+      }
+      return true;
+    });
+
+    if (validContactsData.length === 0) return [];
+
+    const contactIds = validContactsData.map(c => c.contact_id);
     const { data: profilesData } = await supabase
       .from('profiles')
       .select('id, public_id, display_name, created_at')
@@ -312,7 +351,7 @@ class SupabaseService {
 
     const profileMap = new Map((profilesData || []).map(p => [p.id, p]));
 
-    return contactsData.map(row => ({
+    return validContactsData.map(row => ({
       id: row.id,
       user_id: row.user_id,
       contact_id: row.contact_id,
@@ -390,44 +429,141 @@ class SupabaseService {
     return { incoming, outgoing };
   }
 
-  async sendContactRequest(senderId: string, receiverId: string): Promise<{ success: boolean; error?: string }> {
+  async sendContactRequest(senderId: string, receiverId: string): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    autoAccepted?: boolean; 
+    alreadyContact?: boolean;
+    isPending?: boolean;
+    message?: string;
+  }> {
     if (senderId === receiverId) {
       return { success: false, error: 'Cannot add yourself as a contact' };
     }
 
     if (!isConfigured) {
       // Simulate demo request
-      return { success: true };
+      return { success: true, message: 'Contact request sent (Demo Mode)' };
     }
 
-    // Check if already contacts
-    const { data: existingContact } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('user_id', senderId)
-      .eq('contact_id', receiverId)
-      .maybeSingle();
+    try {
+      // 1. Fetch any existing contact requests between these two users in either direction
+      const { data: existingReqs, error: reqsError } = await supabase
+        .from('contact_requests')
+        .select('id, sender_id, receiver_id, status')
+        .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`);
 
-    if (existingContact) {
-      return { success: false, error: 'User is already in your contacts' };
-    }
-
-    const { error } = await supabase
-      .from('contact_requests')
-      .insert({
-        sender_id: senderId,
-        receiver_id: receiverId,
-        status: 'pending'
-      });
-
-    if (error) {
-      if (error.code === '23505') {
-        return { success: false, error: 'Contact request already sent or pending' };
+      if (reqsError) {
+        console.warn('Error querying existing contact requests:', reqsError);
       }
-      return { success: false, error: error.message };
-    }
 
-    return { success: true };
+      // 2. Check if sender already has receiver in their contacts table
+      const { data: existingContact } = await supabase
+        .from('contacts')
+        .select('id')
+        .eq('user_id', senderId)
+        .eq('contact_id', receiverId)
+        .maybeSingle();
+
+      const acceptedReq = existingReqs?.find(r => r.status === 'accepted');
+
+      if (existingContact && acceptedReq) {
+        return { success: true, alreadyContact: true, message: 'User is already in your contacts' };
+      }
+
+      // If sender has an orphan contact row but request was canceled/rejected/missing, clean it up
+      if (existingContact && !acceptedReq) {
+        await supabase
+          .from('contacts')
+          .delete()
+          .eq('user_id', senderId)
+          .eq('contact_id', receiverId);
+      }
+
+      // 3. Mutual handshake detection: Peer ALREADY sent sender a pending request!
+      const incomingPending = existingReqs?.find(
+        r => r.sender_id === receiverId && r.receiver_id === senderId && r.status === 'pending'
+      );
+      if (incomingPending) {
+        const accepted = await this.acceptContactRequest(incomingPending.id, receiverId, senderId);
+        if (accepted) {
+          return { success: true, autoAccepted: true, message: 'Mutual request matched! Contact connected.' };
+        }
+      }
+
+      // 4. Check if sender already has an outgoing pending request
+      const outgoingPending = existingReqs?.find(
+        r => r.sender_id === senderId && r.receiver_id === receiverId && r.status === 'pending'
+      );
+      if (outgoingPending) {
+        return { success: true, isPending: true, message: 'Contact request already sent and pending peer acceptance' };
+      }
+
+      // 5. If a prior request from sender to receiver exists (status was accepted, rejected, or canceled),
+      // reuse and update it to pending rather than insert (which would fail with 23505 unique constraint)
+      const directOld = existingReqs?.find(r => r.sender_id === senderId && r.receiver_id === receiverId);
+      if (directOld) {
+        const { error: updateErr } = await supabase
+          .from('contact_requests')
+          .update({
+            status: 'pending',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', directOld.id);
+
+        if (!updateErr) {
+          return { success: true, message: 'Contact request sent!' };
+        }
+        console.warn('Update existing request failed, trying upsert:', updateErr);
+      }
+
+      // 6. If a prior request in reverse direction exists (and no direct request exists), update it
+      const reverseOld = existingReqs?.find(r => r.sender_id === receiverId && r.receiver_id === senderId);
+      if (reverseOld && !directOld) {
+        const { error: updateRevErr } = await supabase
+          .from('contact_requests')
+          .update({
+            sender_id: senderId,
+            receiver_id: receiverId,
+            status: 'pending',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', reverseOld.id);
+
+        if (!updateRevErr) {
+          return { success: true, message: 'Contact request sent!' };
+        }
+        console.warn('Update reverse request failed, falling through to upsert:', updateRevErr);
+      }
+
+      // 7. Otherwise, upsert or insert a new pending request
+      const { error: upsertErr } = await supabase
+        .from('contact_requests')
+        .upsert({
+          sender_id: senderId,
+          receiver_id: receiverId,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'sender_id,receiver_id' });
+
+      if (upsertErr) {
+        // Fallback update by sender_id & receiver_id
+        const { error: fallbackErr } = await supabase
+          .from('contact_requests')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('sender_id', senderId)
+          .eq('receiver_id', receiverId);
+
+        if (fallbackErr) {
+          return { success: false, error: upsertErr.message };
+        }
+      }
+
+      return { success: true, message: 'Contact request sent!' };
+    } catch (err: any) {
+      console.error('sendContactRequest error:', err);
+      return { success: false, error: err?.message || 'Failed to send contact request' };
+    }
   }
 
   async acceptContactRequest(requestId: string, senderId: string, receiverId: string): Promise<boolean> {
@@ -439,7 +575,10 @@ class SupabaseService {
       .update({ status: 'accepted', updated_at: new Date().toISOString() })
       .eq('id', requestId);
 
-    if (updateError) return false;
+    if (updateError) {
+      console.error('Error accepting contact request:', updateError);
+      return false;
+    }
 
     // 2. Insert bidirectional contacts
     await supabase.from('contacts').upsert([
@@ -461,25 +600,57 @@ class SupabaseService {
     return !error;
   }
 
+  async cancelContactRequest(requestId: string): Promise<boolean> {
+    if (!isConfigured) return true;
+
+    // 1. Try update to canceled (allowed under RLS update policy)
+    await supabase
+      .from('contact_requests')
+      .update({ status: 'canceled', updated_at: new Date().toISOString() })
+      .eq('id', requestId);
+
+    // 2. Also try delete (if delete policy permits)
+    await supabase
+      .from('contact_requests')
+      .delete()
+      .eq('id', requestId);
+
+    return true;
+  }
+
   async removeContact(userId: string, contactId: string): Promise<boolean> {
     if (!isConfigured) return true;
 
     try {
-      // 1. Delete user's contact record (permitted by RLS auth.uid() = user_id)
-      const { error } = await supabase
+      // 1. Delete user's own contact record (permitted by RLS auth.uid() = user_id)
+      await supabase
         .from('contacts')
         .delete()
         .eq('user_id', userId)
         .eq('contact_id', contactId);
 
-      // 2. Also attempt to clean up reverse contact if RLS allows
+      // 2. Also attempt to clean up reverse contact if RLS permits
       await supabase
         .from('contacts')
         .delete()
         .eq('user_id', contactId)
         .eq('contact_id', userId);
 
-      // 3. Remove contact requests in both directions
+      // 3. Mark contact requests in both directions as 'canceled'
+      // RLS UPDATE policy guarantees this succeeds because auth.uid() = sender_id OR receiver_id
+      await supabase
+        .from('contact_requests')
+        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .eq('sender_id', userId)
+        .eq('receiver_id', contactId);
+
+      await supabase
+        .from('contact_requests')
+        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .eq('sender_id', contactId)
+        .eq('receiver_id', userId);
+
+      // 4. Also attempt direct deletion of requests in case delete policy is active
       await supabase
         .from('contact_requests')
         .delete()
@@ -492,11 +663,24 @@ class SupabaseService {
         .eq('sender_id', contactId)
         .eq('receiver_id', userId);
 
-      return !error;
+      return true;
     } catch (err) {
       console.warn('removeContact error (continuing with local removal):', err);
       return true;
     }
+  }
+
+  async unblockContact(userId: string, contactId: string): Promise<void> {
+    if (!isConfigured) return;
+
+    try {
+      // Clean up any stale canceled/rejected requests so re-adding works seamlessly
+      await supabase
+        .from('contact_requests')
+        .delete()
+        .eq('sender_id', userId)
+        .eq('receiver_id', contactId);
+    } catch (_) {}
   }
 
   // --------------------------------------------------------------------------

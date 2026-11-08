@@ -115,6 +115,7 @@ export interface LocalConversation {
 
 export interface CachedPeerData {
   userId: string;
+  displayName?: string;
   avatarBase64?: string;
   publicKeyJWK?: string;
   cachedAt: number;

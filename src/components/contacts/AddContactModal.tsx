@@ -8,7 +8,10 @@ import {
   ShieldCheck, 
   AlertCircle, 
   CheckCircle2,
-  Loader2
+  Loader2,
+  Ban,
+  Check,
+  MessageSquare
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { useAuth } from '@/context/AuthContext';
@@ -24,7 +27,15 @@ interface AddContactModalProps {
 
 export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClose }) => {
   const { currentUser } = useAuth();
-  const { sendContactRequestByPublicId, contacts, selectDirectChat } = useChat();
+  const { 
+    sendContactRequestByPublicId, 
+    contacts, 
+    contactRequests, 
+    selectDirectChat, 
+    blockedUsers, 
+    unblockContact, 
+    acceptRequest 
+  } = useChat();
 
   const [activeTab, setActiveTab] = useState<'id' | 'scan'>('id');
   const [publicIdInput, setPublicIdInput] = useState('');
@@ -158,10 +169,27 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
     try {
       const res = await sendContactRequestByPublicId(previewProfile.public_id);
       if (res.success) {
-        setSuccessMsg(`Contact request sent to ${previewProfile.display_name}!`);
-        setTimeout(() => {
-          onClose();
-        }, 1500);
+        if (res.autoAccepted || res.alreadyContact) {
+          setSuccessMsg(`Connected with ${previewProfile.display_name}! Opening chat...`);
+          setTimeout(() => {
+            const existing = contacts.find(c => c.contact_id === previewProfile.id) || {
+              id: 'c_' + previewProfile.id,
+              user_id: currentUser!.id,
+              contact_id: previewProfile.id,
+              created_at: new Date().toISOString(),
+              profile: previewProfile,
+              presence: 'offline',
+              connectionStatus: 'idle'
+            };
+            selectDirectChat(existing as any);
+            onClose();
+          }, 600);
+        } else {
+          setSuccessMsg(res.message || `Contact request sent to ${previewProfile.display_name}!`);
+          setTimeout(() => {
+            onClose();
+          }, 1500);
+        }
       } else {
         setErrorMsg(res.error || 'Failed to send contact request.');
       }
@@ -268,8 +296,15 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
 
               {/* Profile Preview Card */}
               {previewProfile && (() => {
+                const isBlocked = blockedUsers.includes(previewProfile.id);
                 const existingContact = contacts.find(
                   c => c.contact_id === previewProfile.id || c.profile.public_id === previewProfile.public_id
+                );
+                const incomingReq = contactRequests.incoming.find(
+                  r => r.sender_id === previewProfile.id
+                );
+                const outgoingReq = contactRequests.outgoing.find(
+                  r => r.receiver_id === previewProfile.id
                 );
 
                 return (
@@ -278,13 +313,34 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
                       <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-sky-400 flex items-center justify-center font-bold text-slate-950 text-base">
                         {previewProfile.display_name.substring(0, 2).toUpperCase()}
                       </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-white">{previewProfile.display_name}</h4>
-                        <p className="text-xs font-mono text-cyan-400">{previewProfile.public_id}</p>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-bold text-white truncate">{previewProfile.display_name}</h4>
+                        <p className="text-xs font-mono text-cyan-400 truncate">{previewProfile.public_id}</p>
                       </div>
+                      {isBlocked && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-semibold shrink-0">
+                          Blocked
+                        </span>
+                      )}
                     </div>
 
-                    {existingContact ? (
+                    {isBlocked ? (
+                      <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/80 flex items-center justify-between text-xs text-rose-300">
+                        <div className="flex items-center gap-2">
+                          <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                          <span>This user is blocked</span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await unblockContact(previewProfile.id);
+                            setSuccessMsg(`Unblocked ${previewProfile.display_name}! You can now connect.`);
+                          }}
+                          className="px-3 py-1.5 bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shadow-md transition-all"
+                        >
+                          Unblock
+                        </button>
+                      </div>
+                    ) : existingContact ? (
                       <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/80 flex items-center justify-between text-xs text-emerald-300">
                         <span className="font-medium">Already in your contacts!</span>
                         <button
@@ -292,15 +348,53 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
                             selectDirectChat(existingContact);
                             onClose();
                           }}
-                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shadow-md transition-all"
+                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
                         >
+                          <MessageSquare className="w-3.5 h-3.5" />
                           Open Chat
                         </button>
+                      </div>
+                    ) : incomingReq ? (
+                      <div className="p-3 rounded-xl bg-cyan-950/60 border border-cyan-800/80 flex items-center justify-between text-xs text-cyan-300">
+                        <span className="font-medium">Sent you a request!</span>
+                        <button
+                          onClick={async () => {
+                            setIsSending(true);
+                            const ok = await acceptRequest(incomingReq);
+                            setIsSending(false);
+                            if (ok) {
+                              setSuccessMsg(`Connected with ${previewProfile.display_name}! Opening chat...`);
+                              setTimeout(() => {
+                                const newContact = contacts.find(c => c.contact_id === previewProfile.id);
+                                if (newContact) selectDirectChat(newContact);
+                                onClose();
+                              }, 600);
+                            }
+                          }}
+                          disabled={isSending}
+                          className="px-3 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
+                        >
+                          {isSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          Accept & Chat
+                        </button>
+                      </div>
+                    ) : outgoingReq ? (
+                      <div className="space-y-2">
+                        <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/60 text-xs text-amber-300 flex items-center justify-between">
+                          <span>Request already sent · Pending</span>
+                          <button
+                            onClick={handleSendRequest}
+                            disabled={isSending}
+                            className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-lg text-[11px] font-semibold cursor-pointer"
+                          >
+                            Resend / Ping
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <>
                         <p className="text-[11px] text-slate-400">
-                          Direct P2P communication can begin as soon as this user accepts your request.
+                          Direct P2P communication begins immediately once they accept or scan your QR code.
                         </p>
 
                         <button

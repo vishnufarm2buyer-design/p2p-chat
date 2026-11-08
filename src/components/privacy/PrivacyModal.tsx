@@ -1,15 +1,75 @@
-import React, { useState } from 'react';
-import { X, ShieldCheck, CheckCircle2, ServerOff, Lock, HardDrive, AlertTriangle, Ban, UserCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, ShieldCheck, CheckCircle2, ServerOff, Lock, HardDrive, AlertTriangle, Ban, UserCheck, Loader2 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
+import { supabaseService } from '@/services/supabase';
+import { localDb } from '@/services/db';
+import type { UserProfile } from '@/types';
 
 interface PrivacyModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'architecture' | 'blocked';
 }
 
-export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) => {
+export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose, initialTab = 'architecture' }) => {
   const { blockedUsers, unblockContact } = useChat();
-  const [activeTab, setActiveTab] = useState<'architecture' | 'blocked'>('architecture');
+  const [activeTab, setActiveTab] = useState<'architecture' | 'blocked'>(initialTab);
+  const [blockedProfiles, setBlockedProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (blockedUsers.length === 0) {
+      setBlockedProfiles(new Map());
+      return;
+    }
+
+    Promise.all(
+      blockedUsers.map(async (userId) => {
+        const profile = await supabaseService.getProfile(userId);
+        if (profile) return profile;
+
+        const cached = await localDb.getCachedPeer(userId);
+        if (cached) {
+          return {
+            id: userId,
+            public_id: 'p2p_' + userId.substring(0, 8),
+            display_name: cached.displayName || ('Peer ' + userId.substring(0, 6).toUpperCase()),
+            created_at: new Date(cached.cachedAt).toISOString(),
+            avatar_data: cached.avatarBase64
+          } as UserProfile;
+        }
+
+        return {
+          id: userId,
+          public_id: 'p2p_' + userId.substring(0, 8),
+          display_name: 'Peer ' + userId.substring(0, 6).toUpperCase(),
+          created_at: new Date().toISOString()
+        } as UserProfile;
+      })
+    ).then((profiles) => {
+      if (!mounted) return;
+      const map = new Map<string, UserProfile>();
+      profiles.forEach(p => map.set(p.id, p));
+      setBlockedProfiles(map);
+    });
+
+    return () => { mounted = false; };
+  }, [blockedUsers]);
+
+  if (!isOpen) return null;
+
+  const handleUnblock = async (userId: string) => {
+    setUnblockingId(userId);
+    await unblockContact(userId);
+    setUnblockingId(null);
+  };
 
   if (!isOpen) return null;
 
@@ -83,26 +143,47 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
                   </p>
                 </div>
               ) : (
-                <div className="divide-y divide-slate-800/80 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-                  {blockedUsers.map((userId) => (
-                    <div key={userId} className="p-3.5 flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-red-950/80 border border-red-800/60 flex items-center justify-center text-red-400 text-xs font-bold">
-                          <Ban className="w-3.5 h-3.5" />
+                <div className="space-y-3">
+                  <div className="divide-y divide-slate-800/80 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+                    {blockedUsers.map((userId) => {
+                      const profile = blockedProfiles.get(userId);
+                      const displayName = profile?.display_name || 'Blocked Peer';
+                      const publicId = profile?.public_id || ('p2p_' + userId.substring(0, 8));
+
+                      return (
+                        <div key={userId} className="p-3.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="relative">
+                              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-rose-900 via-rose-950 to-slate-900 border border-rose-800/60 flex items-center justify-center text-rose-300 text-xs font-bold shrink-0">
+                                {displayName.substring(0, 2).toUpperCase()}
+                              </div>
+                              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-rose-600 border border-slate-950 flex items-center justify-center text-[8px] text-white">
+                                <Ban className="w-2.5 h-2.5" />
+                              </span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-white truncate">{displayName}</p>
+                              <p className="text-[10px] font-mono text-cyan-400 truncate">@{publicId}</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleUnblock(userId)}
+                            disabled={unblockingId === userId}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl transition-colors cursor-pointer shrink-0 disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                          >
+                            {unblockingId === userId ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
+                            Unblock
+                          </button>
                         </div>
-                        <div>
-                          <p className="text-xs font-mono text-slate-200">{userId}</p>
-                          <span className="text-[10px] text-red-400">Blocked</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => unblockContact(userId)}
-                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
-                      >
-                        Unblock
-                      </button>
-                    </div>
-                  ))}
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 px-1">
+                    💡 <strong>Tip:</strong> After unblocking, you can easily reconnect by scanning the peer's permanent QR code or sending a new contact request with their public ID.
+                  </p>
                 </div>
               )}
             </div>

@@ -8,7 +8,7 @@ interface ContactRequestsModalProps {
 }
 
 export const ContactRequestsModal: React.FC<ContactRequestsModalProps> = ({ isOpen, onClose }) => {
-  const { contactRequests, acceptRequest, rejectRequest, refreshRequests } = useChat();
+  const { contactRequests, acceptRequest, rejectRequest, cancelRequest, refreshRequests } = useChat();
   const [activeTab, setActiveTab] = useState<'incoming' | 'outgoing'>('incoming');
   const [processingId, setProcessingId] = useState<string | null>(null);
 
@@ -150,10 +150,24 @@ export const ContactRequestsModal: React.FC<ContactRequestsModalProps> = ({ isOp
                     </div>
                   </div>
 
-                  <span className="flex items-center gap-1 text-[11px] text-amber-300 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 font-medium">
-                    <Clock className="w-3 h-3 animate-spin text-amber-400" />
-                    Pending
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="flex items-center gap-1 text-[11px] text-amber-300 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 font-medium">
+                      <Clock className="w-3 h-3 text-amber-400" />
+                      Pending
+                    </span>
+                    <button
+                      onClick={async () => {
+                        setProcessingId(req.id);
+                        await cancelRequest(req);
+                        setProcessingId(null);
+                      }}
+                      disabled={processingId === req.id}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                      title="Cancel Request"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))
             )
