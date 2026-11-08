@@ -49,22 +49,32 @@ export const CallOverlay: React.FC = () => {
   useEffect(() => {
     if (!remoteStream || !isActive) return;
 
+    // 1. Audio element exclusively handles the audio track
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.volume = 1.0;
-      remoteAudioRef.current.play().then(() => {
-        setNeedsAudioGesture(false);
-      }).catch(e => {
-        console.warn('[WebRTC Audio] Remote audio element play error:', e);
-        setNeedsAudioGesture(true);
-      });
+      const audioTracks = remoteStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks.forEach(t => { t.enabled = true; });
+        remoteAudioRef.current.srcObject = new MediaStream(audioTracks);
+        remoteAudioRef.current.volume = 1.0;
+        remoteAudioRef.current.play().then(() => {
+          setNeedsAudioGesture(false);
+        }).catch(e => {
+          console.warn('[WebRTC Audio] Remote audio element play error:', e);
+          setNeedsAudioGesture(true);
+        });
+      }
     }
 
+    // 2. Video element handles video track with muted={true} to prevent autoplay violations & audio conflicts
     if (activeCall.callType === 'video' && remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch(e => {
-        console.warn('[WebRTC Video] Remote video element play error:', e);
-      });
+      const videoTracks = remoteStream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoTracks.forEach(t => { t.enabled = true; });
+        remoteVideoRef.current.srcObject = new MediaStream(videoTracks);
+        remoteVideoRef.current.play().catch(e => {
+          console.warn('[WebRTC Video] Remote video element play error:', e);
+        });
+      }
     }
   }, [remoteStream, activeCall.callType, isActive]);
 
@@ -123,7 +133,10 @@ export const CallOverlay: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-obsidian-950 flex flex-col justify-between p-4 sm:p-6 animate-fade-in select-none">
+    <div 
+      onClick={needsAudioGesture ? handleUnlockAudio : undefined}
+      className="fixed inset-0 z-50 bg-obsidian-950 flex flex-col justify-between p-4 sm:p-6 animate-fade-in select-none"
+    >
       {/* Hidden audio element for audio track playback */}
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
@@ -171,11 +184,12 @@ export const CallOverlay: React.FC = () => {
       <div className="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-3xl bg-black/50 border border-white/10 backdrop-blur-md">
         {isVideo ? (
           <>
-            {/* Remote Video Stream */}
+            {/* Remote Video Stream (muted so browser never blocks video and audio is handled exclusively by remoteAudioRef) */}
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              muted
               className="w-full h-full object-cover rounded-3xl"
             />
 

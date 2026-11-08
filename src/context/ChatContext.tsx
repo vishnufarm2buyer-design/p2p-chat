@@ -332,29 +332,37 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteContact = useCallback(async (contactId: string): Promise<boolean> => {
     if (!currentUser) return false;
-    const ok = await supabaseService.removeContact(currentUser.id, contactId);
-    if (ok) {
-      if (selectedChat?.id === contactId) {
-        setSelectedChat(null);
-      }
-      peerManager.closePeerSession(contactId);
-      await refreshContacts();
+    // 1. Optimistically remove from UI contacts list immediately
+    setContacts(prev => prev.filter(c => c.contact_id !== contactId));
+    if (selectedChat?.id === contactId) {
+      setSelectedChat(null);
     }
+    // 2. Terminate active WebRTC connection
+    peerManager.closePeerSession(contactId);
+    // 3. Delete local conversation summary
+    await localDb.deleteConversation(contactId);
+    // 4. Remove from server contacts and requests
+    const ok = await supabaseService.removeContact(currentUser.id, contactId);
+    await refreshContacts();
     return ok;
   }, [currentUser, selectedChat, refreshContacts]);
 
   const blockContact = useCallback(async (contactId: string): Promise<boolean> => {
     if (!currentUser) return false;
-    // 1. Save to local block list
+    // 1. Save to local block list in IndexedDB
     await localDb.blockUser(contactId);
-    // 2. Remove from Supabase contacts table
-    await supabaseService.removeContact(currentUser.id, contactId);
-    // 3. Close any active WebRTC session
-    peerManager.closePeerSession(contactId);
+    // 2. Optimistically remove from UI contacts list immediately
+    setContacts(prev => prev.filter(c => c.contact_id !== contactId));
     if (selectedChat?.id === contactId) {
       setSelectedChat(null);
     }
-    // 4. Refresh state
+    // 3. Terminate active WebRTC connection immediately
+    peerManager.closePeerSession(contactId);
+    // 4. Delete local conversation summary
+    await localDb.deleteConversation(contactId);
+    // 5. Remove from server contacts and requests
+    await supabaseService.removeContact(currentUser.id, contactId);
+    // 6. Refresh blocked users and contacts
     await refreshBlockedUsers();
     await refreshContacts();
     return true;

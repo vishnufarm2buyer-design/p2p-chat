@@ -411,6 +411,13 @@ class PeerConnectionManager {
   }
 
   private async handleIncomingPacket(peerUserId: string, packet: WirePacket): Promise<void> {
+    const isBlocked = await localDb.isUserBlocked(peerUserId);
+    if (isBlocked) {
+      console.warn(`[WebRTC Privacy] Dropping DataChannel packet from blocked peer: ${peerUserId}`);
+      this.closePeerSession(peerUserId);
+      return;
+    }
+
     const session = this.peers.get(peerUserId);
 
     switch (packet.type) {
@@ -1229,6 +1236,14 @@ class PeerConnectionManager {
     const peerUserId = payload.senderId;
     if (!peerUserId || peerUserId === this.currentUserId) return;
 
+    // Strict Privacy: Drop any signaling packets from blocked users
+    const isBlocked = await localDb.isUserBlocked(peerUserId);
+    if (isBlocked) {
+      console.warn(`[WebRTC Privacy] Dropping signal '${payload.type}' from blocked peer: ${peerUserId}`);
+      this.closePeerSession(peerUserId);
+      return;
+    }
+
     switch (payload.type) {
       case 'connect-ping': {
         // Deterministic initiator check: peer with smaller ID initiates
@@ -1293,6 +1308,19 @@ class PeerConnectionManager {
             }
           }
           session.pendingCandidates = [];
+
+          // If local media stream is active (accepted call), ensure senders are synchronized before answer
+          if (this.localMediaStream && this.activeCall.active) {
+            const senders = session.pc.getSenders();
+            for (const track of this.localMediaStream.getTracks()) {
+              const sender = senders.find(s => s.track?.kind === track.kind);
+              if (sender) {
+                await sender.replaceTrack(track);
+              } else {
+                session.pc.addTrack(track, this.localMediaStream);
+              }
+            }
+          }
 
           // Create and send SDP answer
           const answer = await session.pc.createAnswer();
@@ -1404,7 +1432,22 @@ class PeerConnectionManager {
           if (session && this.localMediaStream) {
             try {
               session.makingOffer = true;
-              const offer = await session.pc.createOffer();
+
+              // Ensure all local media tracks are attached to sender transceivers
+              const senders = session.pc.getSenders();
+              for (const track of this.localMediaStream.getTracks()) {
+                const sender = senders.find(s => s.track?.kind === track.kind);
+                if (sender) {
+                  await sender.replaceTrack(track);
+                } else {
+                  session.pc.addTrack(track, this.localMediaStream);
+                }
+              }
+
+              const offer = await session.pc.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: this.activeCall.callType === 'video'
+              });
               await session.pc.setLocalDescription(offer);
               await signalingService.sendSignal({
                 type: 'offer',
@@ -1509,6 +1552,9 @@ class PeerConnectionManager {
   closePeerSession(peerUserId: string): void {
     this.clearRecoveryTimeout(peerUserId);
     this.clearWatchdog(peerUserId);
+    if (this.activeCall.active && this.activeCall.remoteUserId === peerUserId) {
+      this.endCall();
+    }
     const session = this.peers.get(peerUserId);
     if (session) {
       if (session.dataChannel) {

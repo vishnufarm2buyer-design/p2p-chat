@@ -464,20 +464,39 @@ class SupabaseService {
   async removeContact(userId: string, contactId: string): Promise<boolean> {
     if (!isConfigured) return true;
 
-    // Delete current user's contact record (guaranteed by RLS auth.uid() = user_id)
-    const { error } = await supabase
-      .from('contacts')
-      .delete()
-      .eq('user_id', userId)
-      .eq('contact_id', contactId);
+    try {
+      // 1. Delete user's contact record (permitted by RLS auth.uid() = user_id)
+      const { error } = await supabase
+        .from('contacts')
+        .delete()
+        .eq('user_id', userId)
+        .eq('contact_id', contactId);
 
-    // Also remove any pending contact requests between the two users
-    await supabase
-      .from('contact_requests')
-      .delete()
-      .or(`and(sender_id.eq.${userId},receiver_id.eq.${contactId}),and(sender_id.eq.${contactId},receiver_id.eq.${userId})`);
+      // 2. Also attempt to clean up reverse contact if RLS allows
+      await supabase
+        .from('contacts')
+        .delete()
+        .eq('user_id', contactId)
+        .eq('contact_id', userId);
 
-    return !error;
+      // 3. Remove contact requests in both directions
+      await supabase
+        .from('contact_requests')
+        .delete()
+        .eq('sender_id', userId)
+        .eq('receiver_id', contactId);
+
+      await supabase
+        .from('contact_requests')
+        .delete()
+        .eq('sender_id', contactId)
+        .eq('receiver_id', userId);
+
+      return !error;
+    } catch (err) {
+      console.warn('removeContact error (continuing with local removal):', err);
+      return true;
+    }
   }
 
   // --------------------------------------------------------------------------
