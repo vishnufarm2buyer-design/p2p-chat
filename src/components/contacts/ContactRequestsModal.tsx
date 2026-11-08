@@ -8,9 +8,15 @@ interface ContactRequestsModalProps {
 }
 
 export const ContactRequestsModal: React.FC<ContactRequestsModalProps> = ({ isOpen, onClose }) => {
-  const { contactRequests, acceptRequest, rejectRequest } = useChat();
+  const { contactRequests, acceptRequest, rejectRequest, refreshRequests } = useChat();
   const [activeTab, setActiveTab] = useState<'incoming' | 'outgoing'>('incoming');
   const [processingId, setProcessingId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      refreshRequests();
+    }
+  }, [isOpen, refreshRequests]);
 
   if (!isOpen) return null;
 

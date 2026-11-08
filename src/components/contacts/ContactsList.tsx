@@ -25,12 +25,18 @@ export const ContactsList: React.FC<ContactsListProps> = ({
     selectDirectChat, 
     selectGroupChat, 
     onlineUsers, 
-    peerStatuses 
+    peerStatuses,
+    refreshContacts 
   } = useChat();
 
   const [activeTab, setActiveTab] = useState<'direct' | 'groups'>('direct');
   const [searchQuery, setSearchQuery] = useState('');
   const [conversations, setConversations] = useState<Map<string, LocalConversation>>(new Map());
+
+  // Periodically refresh contacts
+  useEffect(() => {
+    refreshContacts();
+  }, [refreshContacts]);
 
   // Load recent local conversation snippets from IndexedDB
   useEffect(() => {
