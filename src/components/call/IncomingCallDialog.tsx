@@ -64,7 +64,7 @@ export const IncomingCallDialog: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-sm bg-slate-950 border border-slate-800 rounded-3xl p-6 text-center shadow-2xl flex flex-col items-center">
+      <div className="w-full max-w-sm bg-slate-950/90 border border-white/10 rounded-3xl p-6 text-center shadow-2xl backdrop-blur-2xl flex flex-col items-center">
         {/* Caller Avatar with Animated Radar Ring */}
         <div className="relative mb-6 mt-2">
           <div className="absolute inset-0 rounded-full bg-cyan-500/20 animate-radar" />

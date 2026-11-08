@@ -224,6 +224,28 @@ class SignalingService {
         // Non-critical fallback
       }
     }
+
+    // 3. Also route to recipient's personal notification channel for high-reliability delivery
+    if (payload.targetId) {
+      const notifyChannelName = `p2p:notify:${payload.targetId}`;
+      let notifyChannel = this.activeSignalingChannels.get(notifyChannelName);
+      if (!notifyChannel) {
+        notifyChannel = supabase.channel(notifyChannelName, {
+          config: { broadcast: { self: false } }
+        });
+        notifyChannel.subscribe();
+        this.activeSignalingChannels.set(notifyChannelName, notifyChannel);
+      }
+      try {
+        await notifyChannel.send({
+          type: 'broadcast',
+          event: 'signal',
+          payload
+        });
+      } catch (err) {
+        // Non-critical fallback
+      }
+    }
   }
 
   /**

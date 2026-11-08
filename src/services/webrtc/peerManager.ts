@@ -92,8 +92,14 @@ class PeerConnectionManager {
     forceRestart: boolean = false
   ): Promise<PeerSession> {
     const existing = this.peers.get(peerUserId);
-    if (!forceRestart && existing && existing.status === 'connected') {
-      return existing;
+    if (!forceRestart && existing) {
+      if (existing.status === 'connected') {
+        return existing;
+      }
+      if (existing.status === 'signaling' || existing.status === 'connecting') {
+        console.log(`[WebRTC] Peer ${peerUserId} connection in progress ('${existing.status}'); awaiting handshake.`);
+        return existing;
+      }
     }
 
     if (existing) {
@@ -107,6 +113,27 @@ class PeerConnectionManager {
     let pubKey = peerPublicKeyJWK;
     if (!pubKey) {
       pubKey = (await supabaseService.getPeerPublicKey(peerUserId)) || undefined;
+    }
+
+    // Deterministic initiator: Peer with lexicographically smaller ID initiates offer
+    const isDesignatedInitiator = !this.currentUserId || this.currentUserId < peerUserId;
+
+    if (!isDesignatedInitiator && !forceRestart) {
+      // Receiver: Send connect-ping to let designated initiator create offer
+      console.log(`[WebRTC] Sending connect-ping to designated initiator ${peerUserId}`);
+      this.updateStatus(peerUserId, 'connecting');
+      this.startConnectionWatchdog(peerUserId);
+
+      await signalingService.sendSignal({
+        type: 'connect-ping',
+        senderId: this.currentUserId!,
+        targetId: peerUserId,
+        sessionId: 'ping_' + Date.now(),
+        timestamp: Date.now()
+      });
+
+      const session = this.createPeerSession(peerUserId, false, pubKey);
+      return session;
     }
 
     const session = this.createPeerSession(peerUserId, true, pubKey);
@@ -925,7 +952,7 @@ class PeerConnectionManager {
           const session = this.peers.get(peerUserId);
           if (!session || session.status === 'idle' || session.status === 'failed' || session.status === 'disconnected') {
             console.log(`[WebRTC] Received connect-ping from ${peerUserId}, initiating as designated initiator.`);
-            await this.connectToPeer(peerUserId);
+            await this.connectToPeer(peerUserId, undefined, true);
           }
         }
         break;
@@ -945,7 +972,17 @@ class PeerConnectionManager {
 
         session.ignoreOffer = !isPolite && offerCollision;
         if (session.ignoreOffer) {
-          console.warn(`[WebRTC Glare] Collision with ${peerUserId}. Impolite peer ignores colliding offer.`);
+          console.warn(`[WebRTC Glare] Collision with ${peerUserId}. Impolite peer re-asserts local offer.`);
+          if (session.pc.localDescription) {
+            await signalingService.sendSignal({
+              type: 'offer',
+              senderId: this.currentUserId!,
+              targetId: peerUserId,
+              sessionId: 'reassert_' + Date.now(),
+              sdp: session.pc.localDescription,
+              timestamp: Date.now()
+            });
+          }
           return;
         }
 
@@ -964,7 +1001,9 @@ class PeerConnectionManager {
           // Drain queued ICE candidates
           for (const candidate of session.pendingCandidates) {
             try {
-              await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+              if (candidate && candidate.candidate) {
+                await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+              }
             } catch (err) {
               console.warn('[WebRTC] Error adding queued ICE candidate:', err);
             }
@@ -1008,7 +1047,9 @@ class PeerConnectionManager {
           // Drain pending candidates
           for (const candidate of session.pendingCandidates) {
             try {
-              await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+              if (candidate && candidate.candidate) {
+                await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+              }
             } catch (err) {
               console.warn('[WebRTC] Error adding queued candidate after answer:', err);
             }
@@ -1022,7 +1063,7 @@ class PeerConnectionManager {
       }
 
       case 'ice-candidate': {
-        if (!payload.candidate) return;
+        if (!payload.candidate || !payload.candidate.candidate) return;
         const session = this.peers.get(peerUserId);
         if (session) {
           if (session.pc.remoteDescription && session.pc.remoteDescription.type) {
@@ -1245,7 +1286,7 @@ class PeerConnectionManager {
       if (!current || current.status === 'connected') return;
 
       try {
-        if ('restartIce' in current.pc && !isFailed) {
+        if ('restartIce' in current.pc && !isFailed && current.pc.signalingState === 'stable') {
           console.log(`[WebRTC] Attempting ICE restart for ${peerUserId}...`);
           current.pc.restartIce();
           current.makingOffer = true;

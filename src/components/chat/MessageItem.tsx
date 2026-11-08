@@ -50,14 +50,14 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
     minute: '2-digit'
   });
 
-  // Render Call Log cards
+  // Call Log card styling
   if (message.type === 'call_log') {
     const isVideo = message.callMetadata?.callType === 'video';
     const isMissed = message.callMetadata?.status === 'missed';
 
     return (
-      <div className="flex justify-center my-3">
-        <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300 shadow-sm">
+      <div className="flex justify-center my-3 select-none">
+        <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-slate-900/80 border border-white/10 text-xs text-slate-300 shadow-md backdrop-blur-xl">
           {isVideo ? (
             <Video className="w-4 h-4 text-sky-400" />
           ) : isMissed ? (
@@ -65,8 +65,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
           ) : (
             <Phone className="w-4 h-4 text-emerald-400" />
           )}
-          <span>{message.content}</span>
-          <span className="text-[10px] text-slate-500">• {formattedTime}</span>
+          <span className="font-medium">{message.content}</span>
+          <span className="text-[10px] text-slate-500 font-mono">• {formattedTime}</span>
         </div>
       </div>
     );
@@ -76,30 +76,30 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
   const isVideoFile = message.fileMetadata?.mimeType?.startsWith('video/');
 
   return (
-    <div className={`flex flex-col mb-3 group ${isSelf ? 'items-end' : 'items-start'}`}>
-      <div className="flex items-end gap-1.5 max-w-[85%] sm:max-w-[70%]">
-        {/* Delete action button on hover */}
+    <div className={`flex flex-col mb-3 group ${isSelf ? 'items-end' : 'items-start'} select-text`}>
+      <div className="flex items-end gap-1.5 max-w-[88%] sm:max-w-[72%]">
+        {/* Delete action button on hover for self messages */}
         {isSelf && (
           <button
             onClick={handleDelete}
-            className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 transition-opacity rounded cursor-pointer mb-1"
+            className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-red-400 transition-all rounded-lg cursor-pointer mb-1 shrink-0"
             title="Delete locally"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         )}
 
-        {/* Message Bubble */}
+        {/* Message Bubble Card */}
         <div
-          className={`rounded-2xl px-4 py-2.5 shadow-md relative ${
+          className={`rounded-2xl px-4 py-2.5 shadow-md relative transition-all duration-200 ${
             isSelf
-              ? 'bg-gradient-to-r from-cyan-600 to-sky-600 text-white rounded-br-xs'
-              : 'bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-xs'
+              ? 'bg-gradient-to-tr from-cyan-600 via-sky-600 to-indigo-600 text-white rounded-br-xs shadow-cyan-600/10'
+              : 'bg-slate-900/90 border border-white/[0.08] text-slate-100 rounded-bl-xs backdrop-blur-xl shadow-black/20'
           }`}
         >
-          {/* Sender name in group or received */}
+          {/* Sender name for received / group messages */}
           {!isSelf && (
-            <p className="text-[11px] font-semibold text-cyan-400 mb-1">
+            <p className="text-[11px] font-bold text-cyan-400 mb-1 select-none">
               {message.senderName}
             </p>
           )}
@@ -113,10 +113,10 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
 
           {/* File / Media Content */}
           {message.type === 'file' && message.fileMetadata && (
-            <div className="space-y-2">
+            <div className="space-y-2 select-none">
               {/* Image Preview */}
               {isImage && (message.fileMetadata.blobUrl || message.fileMetadata.dataBlob) && (
-                <div className="rounded-xl overflow-hidden max-w-sm max-h-64 border border-black/20 bg-black/40">
+                <div className="rounded-xl overflow-hidden max-w-sm max-h-64 border border-white/10 bg-black/40">
                   <img
                     src={message.fileMetadata.blobUrl || (message.fileMetadata.dataBlob ? URL.createObjectURL(message.fileMetadata.dataBlob) : '')}
                     alt={message.fileMetadata.name}
@@ -128,7 +128,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
 
               {/* Video Preview */}
               {isVideoFile && (message.fileMetadata.blobUrl || message.fileMetadata.dataBlob) && (
-                <div className="rounded-xl overflow-hidden max-w-sm max-h-64 border border-black/20 bg-black">
+                <div className="rounded-xl overflow-hidden max-w-sm max-h-64 border border-white/10 bg-black">
                   <video
                     src={message.fileMetadata.blobUrl || (message.fileMetadata.dataBlob ? URL.createObjectURL(message.fileMetadata.dataBlob) : '')}
                     controls
@@ -138,12 +138,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
               )}
 
               {/* General File Card */}
-              <div className="flex items-center gap-3 p-2.5 rounded-xl bg-black/20 border border-white/10">
-                <div className="w-9 h-9 rounded-lg bg-cyan-950 flex items-center justify-center text-cyan-400 shrink-0">
+              <div className="flex items-center gap-3 p-2.5 rounded-xl bg-black/25 border border-white/10 backdrop-blur-md">
+                <div className="w-9 h-9 rounded-xl bg-cyan-950 flex items-center justify-center text-cyan-400 shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate text-white">
+                  <p className="text-xs font-semibold truncate text-white">
                     {message.fileMetadata.name}
                   </p>
                   <p className="text-[10px] text-slate-300">
@@ -152,7 +152,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
                 </div>
                 <button
                   onClick={handleDownloadFile}
-                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white cursor-pointer"
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 transition-colors text-white cursor-pointer"
                   title="Download File"
                 >
                   <Download className="w-4 h-4" />
@@ -161,14 +161,14 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
             </div>
           )}
 
-          {/* Footer Info: E2EE lock, timestamp & delivery status */}
-          <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-75">
+          {/* Footer Info: Lock, timestamp & ticks */}
+          <div className="flex items-center justify-end gap-1.5 mt-1.5 text-[10px] opacity-80 select-none">
             {message.isE2EE && (
               <span className="flex items-center gap-0.5 text-cyan-200" title="Application-Level AES-256-GCM Encrypted">
                 <Lock className="w-3 h-3" />
               </span>
             )}
-            <span>{formattedTime}</span>
+            <span className="font-mono">{formattedTime}</span>
 
             {isSelf && (
               <span>
@@ -189,7 +189,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isSelf, onDel
         {!isSelf && (
           <button
             onClick={handleDelete}
-            className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 transition-opacity rounded cursor-pointer mb-1"
+            className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-red-400 transition-all rounded-lg cursor-pointer mb-1 shrink-0"
             title="Delete locally"
           >
             <Trash2 className="w-3.5 h-3.5" />

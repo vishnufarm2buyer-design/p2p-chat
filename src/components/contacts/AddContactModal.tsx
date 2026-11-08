@@ -175,44 +175,51 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in select-none">
+      <div className="w-full max-w-md bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col backdrop-blur-2xl">
         {/* Modal Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <UserPlus className="w-5 h-5 text-cyan-400" />
-            <h3 className="text-base font-bold text-white">Add New Contact</h3>
+        <div className="p-4 sm:p-5 border-b border-white/[0.08] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+              <UserPlus className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Add New Contact</h3>
+              <p className="text-[10px] text-slate-400">Search by public ID or scan QR</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/[0.06] cursor-pointer transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Switcher */}
-        <div className="grid grid-cols-2 p-2 bg-slate-900/60 border-b border-slate-800 text-xs">
-          <button
-            onClick={() => setActiveTab('id')}
-            className={`py-2 rounded-lg font-semibold transition-all cursor-pointer ${
-              activeTab === 'id'
-                ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Enter Public ID
-          </button>
-          <button
-            onClick={() => setActiveTab('scan')}
-            className={`py-2 rounded-lg font-semibold transition-all cursor-pointer ${
-              activeTab === 'scan'
-                ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Scan Permanent QR
-          </button>
+        <div className="p-2.5 bg-slate-900/60 border-b border-white/[0.06]">
+          <div className="grid grid-cols-2 p-1 bg-slate-900/90 rounded-2xl border border-white/[0.06] text-xs">
+            <button
+              onClick={() => setActiveTab('id')}
+              className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                activeTab === 'id'
+                  ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Enter Public ID
+            </button>
+            <button
+              onClick={() => setActiveTab('scan')}
+              className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                activeTab === 'scan'
+                  ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Scan Permanent QR
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}

@@ -85,6 +85,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Calling
   const [activeCall, setActiveCall] = useState<ActiveCallState>(peerManager.getActiveCall());
+  const activeCallRef = useRef<ActiveCallState>(activeCall);
+  activeCallRef.current = activeCall;
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
@@ -174,10 +176,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Call state updates
     const unbindCall = peerManager.onCallStateChange((state) => {
+      activeCallRef.current = state;
       setActiveCall(state);
       setLocalStream(peerManager.getLocalMediaStream());
       if (state.remoteUserId) {
-        setRemoteStream(peerManager.getRemoteMediaStream(state.remoteUserId) || null);
+        const stream = peerManager.getRemoteMediaStream(state.remoteUserId);
+        setRemoteStream(stream ? new MediaStream(stream.getTracks()) : null);
       } else {
         setRemoteStream(null);
       }
@@ -185,8 +189,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Remote stream updates
     const unbindStream = peerManager.onRemoteStream((peerId, stream) => {
-      if (activeCall.remoteUserId === peerId) {
-        setRemoteStream(stream);
+      if (activeCallRef.current.remoteUserId === peerId || !activeCallRef.current.remoteUserId) {
+        setRemoteStream(new MediaStream(stream.getTracks()));
       }
     });
 

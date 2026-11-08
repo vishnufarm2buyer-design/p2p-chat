@@ -11,7 +11,8 @@ import {
   HardDrive, 
   ShieldCheck, 
   Edit2,
-  CheckCircle2
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { qrService } from '@/services/qr';
@@ -98,26 +99,31 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in select-none">
+      <div className="w-full max-w-md bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] backdrop-blur-2xl">
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-cyan-400" />
-            <h3 className="text-base font-bold text-white">My Profile & Permanent Identity</h3>
+        <div className="p-4 sm:p-5 border-b border-white/[0.08] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Permanent Cryptographic Identity</h3>
+              <p className="text-[10px] text-slate-400">Device-bound E2EE key agreement</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/[0.06] cursor-pointer transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-6 overflow-y-auto space-y-6">
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
           {storageWiped && (
-            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-900/60 text-xs text-emerald-300 flex items-center gap-2">
+            <div className="p-3 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-xs text-emerald-300 flex items-center gap-2 animate-fade-in">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>All local chat history and cached peer data has been wiped.</span>
             </div>
@@ -126,14 +132,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
           {/* Avatar & Display Name */}
           <div className="flex flex-col items-center text-center">
             <div className="relative group mb-3">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-cyan-500 to-sky-400 flex items-center justify-center font-bold text-slate-950 text-2xl shadow-xl overflow-hidden">
+              <div className="w-22 h-22 rounded-3xl bg-gradient-to-tr from-cyan-500 via-sky-500 to-indigo-600 flex items-center justify-center font-bold text-slate-950 text-2xl shadow-xl overflow-hidden ring-4 ring-white/5">
                 {currentUser.avatar_data ? (
                   <img src={currentUser.avatar_data} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
                   currentUser.display_name.substring(0, 2).toUpperCase()
                 )}
               </div>
-              <label className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white">
+              <label className="absolute inset-0 rounded-3xl bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white backdrop-blur-xs">
                 <Camera className="w-6 h-6" />
                 <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
               </label>
@@ -146,12 +152,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="px-2.5 py-1 bg-slate-900 border border-cyan-500 rounded-lg text-sm text-white focus:outline-none"
+                  className="px-3 py-1 bg-slate-900 border border-cyan-500 rounded-xl text-sm text-white focus:outline-none"
                   autoFocus
                 />
                 <button
                   onClick={handleSaveDisplayName}
-                  className="px-2.5 py-1 bg-cyan-500 text-slate-950 rounded-lg text-xs font-bold cursor-pointer"
+                  className="px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold cursor-pointer transition-all"
                 >
                   Save
                 </button>
@@ -169,68 +175,68 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
               </div>
             )}
             <p className="text-[11px] text-slate-400 mt-1">
-              Avatar is stored on device and transferred peer-to-peer (never on cloud).
+              Your avatar is stored strictly on device and shared peer-to-peer (never on cloud).
             </p>
           </div>
 
           {/* Permanent Public ID */}
-          <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 Permanent Public ID
               </span>
-              <span className="text-[10px] text-cyan-400">Never Changes</span>
+              <span className="text-[10px] text-cyan-400 font-medium">Never Changes</span>
             </div>
-            <div className="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
-              <span className="font-mono text-sm text-cyan-300 select-all font-semibold">
+            <div className="flex items-center justify-between bg-slate-900/90 px-3.5 py-2.5 rounded-xl border border-white/[0.08]">
+              <span className="font-mono text-xs sm:text-sm text-cyan-300 select-all font-bold truncate mr-2">
                 {currentUser.public_id}
               </span>
               <button
                 onClick={handleCopyPublicId}
-                className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
                 title="Copy Public ID"
               >
                 {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <p className="text-[11px] text-slate-400">
-              Share this ID with peers so they can send you contact requests.
+              Share this ID with friends so they can add you directly.
             </p>
           </div>
 
           {/* Permanent QR Code */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col items-center text-center space-y-3">
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex flex-col items-center text-center space-y-3">
             <div className="flex items-center justify-between w-full">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <QrCode className="w-4 h-4 text-cyan-400" />
                 Permanent Identity QR Code
               </span>
-              <span className="text-[10px] text-slate-400">Format: p2pchat://user/...</span>
+              <span className="text-[10px] text-slate-400">p2pchat://user/...</span>
             </div>
 
             {/* QR Image Box */}
-            <div className="p-3 bg-slate-950 rounded-2xl border border-cyan-800/60 shadow-lg">
+            <div className="p-3 bg-white rounded-2xl shadow-xl">
               {qrDataUrl ? (
-                <img src={qrDataUrl} alt="Permanent Identity QR Code" className="w-48 h-48 rounded-lg" />
+                <img src={qrDataUrl} alt="Permanent Identity QR Code" className="w-44 h-44 rounded-lg" />
               ) : (
-                <div className="w-48 h-48 bg-slate-900 animate-pulse rounded-lg flex items-center justify-center text-slate-600">
+                <div className="w-44 h-44 bg-slate-900 animate-pulse rounded-lg flex items-center justify-center text-slate-600 text-xs">
                   Generating QR...
                 </div>
               )}
             </div>
 
             {/* QR Download & Share buttons */}
-            <div className="flex items-center gap-2 w-full">
+            <div className="flex items-center gap-2 w-full pt-1">
               <button
                 onClick={handleDownloadQr}
-                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 py-2 bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 text-xs font-bold rounded-xl border border-white/[0.08] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                Download QR
+                Download PNG
               </button>
               <button
                 onClick={handleShareQr}
-                className="flex-1 py-2 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 text-xs font-semibold rounded-xl border border-cyan-800/80 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 py-2 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 Share Link
@@ -239,15 +245,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
           </div>
 
           {/* Local Device Storage Controls */}
-          <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                 <HardDrive className="w-4 h-4 text-amber-400" />
-                Local Device Storage (IndexedDB)
+                Local Storage (IndexedDB)
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Your conversations are stored only inside this browser on this device. No chat backup exists in the cloud.
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Conversations are stored only inside your browser database. No chat backup exists in the cloud.
             </p>
             <button
               onClick={handleWipeLocalStorage}
@@ -260,21 +266,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-between shrink-0 bg-slate-950">
+        <div className="p-4 border-t border-white/[0.08] flex items-center justify-between shrink-0 bg-slate-950/80">
           <button
             onClick={() => {
               signOut();
               onClose();
             }}
-            className="text-xs font-medium text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+            className="text-xs font-semibold text-red-400 hover:text-red-300 transition-colors cursor-pointer"
           >
-            Sign Out of Account
+            Sign Out
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl cursor-pointer"
+            className="px-5 py-2 bg-white/[0.08] hover:bg-white/[0.12] text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
           >
-            Done
+            Close
           </button>
         </div>
       </div>

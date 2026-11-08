@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, 
-  ShieldCheck, 
-  Share2, 
-  ArrowLeft,
-  CircleDot
+  ArrowLeft, 
+  CircleDot, 
+  Lock,
+  Share2
 } from 'lucide-react';
-import type { LocalMessage, PeerConnectionStatus } from '@/types';
+import type { LocalMessage, GroupItem } from '@/types';
 import { MessageItem } from '../chat/MessageItem';
 import { ChatInput } from '../chat/ChatInput';
 import { useChat } from '@/context/ChatContext';
@@ -20,13 +20,13 @@ export const GroupChatArea: React.FC = () => {
   const { selectedChat, closeChat, sendMessage, sendFile, onlineUsers } = useChat();
 
   const [messages, setMessages] = useState<LocalMessage[]>([]);
-  const [memberStatuses, setMemberStatuses] = useState<Map<string, PeerConnectionStatus>>(new Map());
+  const [memberStatuses, setMemberStatuses] = useState<Map<string, string>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const groupId = selectedChat?.id || '';
-  const group = selectedChat?.group;
+  const group = selectedChat?.group as GroupItem | undefined;
+  const groupId = group?.id || '';
 
-  // 1. Load local message history
+  // Load message history from local database
   useEffect(() => {
     if (!groupId) return;
 
@@ -35,8 +35,7 @@ export const GroupChatArea: React.FC = () => {
       if (mounted) setMessages(history);
     });
 
-    const unbindMsg = peerManager.onMessageReceived((newMsg) => {
-      // In group messages, we tag content or senderId
+    const unbindMsg = peerManager.onMessageReceived((newMsg: LocalMessage) => {
       if (newMsg.conversationId === groupId && mounted) {
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -45,9 +44,9 @@ export const GroupChatArea: React.FC = () => {
       }
     });
 
-    const unbindStatus = groupMeshManager.onStatusChange((gid, statusMap) => {
-      if (gid === groupId && mounted) {
-        setMemberStatuses(new Map(statusMap));
+    const unbindStatus = groupMeshManager.onStatusChange((changedGroupId, statusMap) => {
+      if (changedGroupId === groupId && mounted) {
+        setMemberStatuses(statusMap);
       }
     });
 
@@ -79,66 +78,67 @@ export const GroupChatArea: React.FC = () => {
   if (!group) return null;
 
   const totalMembers = group.members.length;
-  // Mesh connection count: N * (N - 1) / 2
   const totalMeshLines = Math.floor((totalMembers * (totalMembers - 1)) / 2);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative select-none">
       {/* Group Header */}
-      <div className="h-20 border-b border-slate-800/90 bg-slate-950/80 backdrop-blur px-4 flex flex-col justify-center z-10 shrink-0">
+      <div className="border-b border-white/[0.06] bg-slate-950/80 backdrop-blur-2xl px-3.5 sm:px-6 py-3 flex flex-col justify-center z-20 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
+            {/* Back button on mobile */}
             <button
               onClick={closeChat}
-              className="md:hidden p-2 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              className="md:hidden p-2 text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/10 rounded-xl transition-all cursor-pointer"
+              title="Back to conversations"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
 
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white shadow-md">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <Users className="w-5 h-5" />
             </div>
 
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-white">{group.name}</h2>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-950 text-sky-400 border border-sky-800/60">
-                  Full Mesh ({totalMeshLines} P2P Links)
+                <h2 className="text-sm font-bold text-white truncate max-w-[150px] sm:max-w-xs">{group.name}</h2>
+                <span className="hidden sm:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                  Full Mesh ({totalMeshLines} Links)
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                {totalMembers} members • Zero Central Relay
+                {totalMembers} members • Zero Central Server
               </p>
             </div>
           </div>
         </div>
 
         {/* Member Peer Status Bar */}
-        <div className="flex items-center gap-2 mt-1.5 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 mt-2 overflow-x-auto no-scrollbar">
           {group.members.map((member) => {
             const isSelf = member.user_id === currentUser?.id;
             const isOnline = onlineUsers.has(member.user_id);
             const status = memberStatuses.get(member.user_id) || 'idle';
 
-            let statusColor = 'bg-slate-700 text-slate-400 border-slate-800';
+            let statusColor = 'bg-slate-800 text-slate-400 border-white/5';
             if (isSelf) {
-              statusColor = 'bg-cyan-950 text-cyan-300 border-cyan-800/60';
+              statusColor = 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20';
             } else if (status === 'connected') {
-              statusColor = 'bg-emerald-950 text-emerald-300 border-emerald-800/60';
+              statusColor = 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20';
             } else if (status === 'connecting') {
-              statusColor = 'bg-sky-950 text-sky-300 border-sky-800/60 animate-pulse';
+              statusColor = 'bg-sky-500/10 text-sky-300 border-sky-500/20 animate-pulse';
             } else if (isOnline) {
-              statusColor = 'bg-amber-950 text-amber-300 border-amber-800/60';
+              statusColor = 'bg-amber-500/10 text-amber-300 border-amber-500/20';
             }
 
             return (
               <span
                 key={member.user_id}
-                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${statusColor} shrink-0`}
+                className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full border ${statusColor} shrink-0 font-medium`}
                 title={`Status: ${isSelf ? 'You' : status}`}
               >
                 <CircleDot className="w-2.5 h-2.5" />
-                <span className="truncate max-w-[80px]">
+                <span className="truncate max-w-[90px]">
                   {isSelf ? 'You' : (member.profile?.display_name || 'Member')}
                 </span>
               </span>
@@ -148,15 +148,15 @@ export const GroupChatArea: React.FC = () => {
       </div>
 
       {/* Group Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-ambient-mesh select-text">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12">
-            <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-3 text-sky-400">
-              <Share2 className="w-6 h-6" />
+          <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12 select-none">
+            <div className="w-14 h-14 rounded-3xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-3 text-sky-400 shadow-xl">
+              <Share2 className="w-7 h-7" />
             </div>
-            <p className="text-sm font-semibold text-slate-300">Host-Coordinated Full Mesh</p>
-            <p className="text-xs text-slate-400 max-w-xs mt-1">
-              Every message and file is fanned out directly to every connected participant. The host never stores or forwards group data.
+            <p className="text-sm font-bold text-slate-200">Host-Coordinated Full Mesh</p>
+            <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+              Every message and file is fanned out directly to every connected participant. The server never stores or forwards group data.
             </p>
           </div>
         ) : (

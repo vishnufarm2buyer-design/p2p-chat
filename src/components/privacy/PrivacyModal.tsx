@@ -14,32 +14,32 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-2xl bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in select-none">
+      <div className="w-full max-w-2xl bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] backdrop-blur-2xl">
         {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900/40">
+        <div className="p-4 sm:p-5 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-slate-900/40">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Privacy & Security Center</h3>
-              <p className="text-xs text-slate-400">"The server connects people; their devices communicate."</p>
+              <h3 className="text-sm font-bold text-white">Privacy & Security Architecture</h3>
+              <p className="text-[10px] text-slate-400">"The server connects people; their devices communicate."</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/[0.06] cursor-pointer transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Switcher */}
-        <div className="px-6 pt-4 flex gap-2 border-b border-slate-800/60 bg-slate-950">
+        <div className="px-6 pt-3 flex gap-4 border-b border-white/[0.06] bg-slate-950/80">
           <button
             onClick={() => setActiveTab('architecture')}
-            className={`pb-3 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+            className={`pb-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
               activeTab === 'architecture'
                 ? 'border-cyan-400 text-cyan-300'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -49,7 +49,7 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
           </button>
           <button
             onClick={() => setActiveTab('blocked')}
-            className={`pb-3 text-xs font-semibold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`pb-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'blocked'
                 ? 'border-cyan-400 text-cyan-300'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
