@@ -8,38 +8,88 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
-    background-color: #0d1117;
-    color: #e6edf3;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: #08090d;
+    color: #f0f3f6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    user-select: none;
   }
 
   * {
     box-sizing: border-box;
   }
+
+  ::selection {
+    background: rgba(6, 182, 212, 0.35);
+    color: #ffffff;
+  }
 }
 
-/* Thin scrollbars */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+/* Obsidian Glass & Refined Surfaces */
+.bg-obsidian-950 { background-color: #08090d; }
+.bg-obsidian-900 { background-color: #0f1117; }
+.bg-obsidian-850 { background-color: #141721; }
+.bg-obsidian-800 { background-color: #1a1e2b; }
 
-/* Radar animation for call UI */
+.glass-panel {
+  background: rgba(15, 17, 23, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-dock {
+  background: rgba(15, 17, 23, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.7);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Thin modern scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(6, 182, 212, 0.4); }
+
+/* Radar & Pulse Animations */
 @keyframes radar-ripple {
-  0%   { transform: scale(0.9); opacity: 0.7; }
-  100% { transform: scale(2.2); opacity: 0; }
+  0%   { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
 }
 .animate-radar { animation: radar-ripple 2s cubic-bezier(0, 0.2, 0.8, 1) infinite; }
 
-/* Fade in animation */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.6); }
+  70%  { transform: scale(1);    box-shadow: 0 0 0 8px rgba(6, 182, 212, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+}
+.animate-pulse-ring { animation: pulse-ring 2.5s infinite; }
+
+/* Micro Fade-In */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in { animation: fadeIn 0.15s ease-out; }
+.animate-fade-in { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
 
-/* Safe area helpers for notched phones */
-.pb-safe { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
-.pt-safe { padding-top: max(0, env(safe-area-inset-top)); }
+/* Ambient glow accents */
+.glow-cyan {
+  box-shadow: 0 0 20px -3px rgba(6, 182, 212, 0.35);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.35);
+}
+
+/* Safe area padding for mobile notch/home-bar */
+.pb-safe { padding-bottom: max(0.85rem, env(safe-area-inset-bottom)); }
+.pt-safe { padding-top: max(0.5rem, env(safe-area-inset-top)); }

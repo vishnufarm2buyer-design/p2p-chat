@@ -80,6 +80,17 @@ class DataChannelChunker {
 
     const fileBuffer = await file.arrayBuffer();
 
+    // Compute SHA-256 checksum for end-to-end file integrity verification
+    let sha256Hash = '';
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
+      sha256Hash = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch (e) {
+      console.warn('Could not compute file hash:', e);
+    }
+
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
       if (transfer.cancelled) {
         dataChannel.send(JSON.stringify({
@@ -143,11 +154,12 @@ class DataChannelChunker {
       onProgress?.(metadata.fileId, percent, currentBytes, totalBytes);
     }
 
-    // 2. Send FILE_END packet
+    // 2. Send FILE_END packet with checksum
     dataChannel.send(JSON.stringify({
       type: 'FILE_END',
       id: metadata.fileId,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      sha256Hash: sha256Hash || undefined
     }));
 
     this.outgoingTransfers.delete(metadata.fileId);

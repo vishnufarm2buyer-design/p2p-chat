@@ -38,7 +38,12 @@ export const GroupChatArea: React.FC = () => {
     const unbindMsg = peerManager.onMessageReceived((newMsg: LocalMessage) => {
       if (newMsg.conversationId === groupId && mounted) {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          const idx = prev.findIndex(m => m.id === newMsg.id);
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = newMsg;
+            return next;
+          }
           return [...prev, newMsg];
         });
       }
@@ -64,26 +69,35 @@ export const GroupChatArea: React.FC = () => {
   const handleSendMessage = async (text: string) => {
     const sent = await sendMessage(text);
     if (sent) {
-      setMessages((prev) => [...prev, sent]);
+      setMessages((prev) => {
+        if (prev.some(m => m.id === sent.id)) return prev;
+        return [...prev, sent];
+      });
     }
   };
 
   const handleSendFile = async (file: File) => {
     const sent = await sendFile(file);
     if (sent) {
-      setMessages((prev) => [...prev, sent]);
+      setMessages((prev) => {
+        if (prev.some(m => m.id === sent.id)) return prev;
+        return [...prev, sent];
+      });
     }
   };
 
   if (!group) return null;
 
   const totalMembers = group.members.length;
-  const totalMeshLines = Math.floor((totalMembers * (totalMembers - 1)) / 2);
+  const connectedCount = group.members.filter(m => {
+    if (m.user_id === currentUser?.id) return true;
+    return memberStatuses.get(m.user_id) === 'connected';
+  }).length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: '#0d1117', position: 'relative' }} className="select-none">
-      {/* Group Header */}
-      <div className="border-b border-white/[0.06] bg-slate-950/80 backdrop-blur-2xl px-3.5 sm:px-6 py-3 flex flex-col justify-center z-20 shrink-0">
+    <div className="flex-1 flex flex-col h-full bg-obsidian-950 overflow-hidden relative select-none">
+      {/* ── Group Header ── */}
+      <div className="border-b border-white/[0.06] bg-obsidian-900/70 backdrop-blur-2xl px-3.5 sm:px-6 py-3 flex flex-col justify-center z-20 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* Back button on mobile */}
@@ -103,32 +117,33 @@ export const GroupChatArea: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-white truncate max-w-[150px] sm:max-w-xs">{group.name}</h2>
                 <span className="hidden sm:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                  Full Mesh ({totalMeshLines} Links)
+                  Full Mesh ({connectedCount}/{totalMembers} Live)
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                {totalMembers} members • Zero Central Server
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <Lock className="w-3 h-3 text-emerald-400" />
+                <span>Zero Server Relays · Direct P2P Fan-out</span>
               </p>
             </div>
           </div>
         </div>
 
         {/* Member Peer Status Bar */}
-        <div className="flex items-center gap-2 mt-2 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 mt-2 overflow-x-auto no-scrollbar">
           {group.members.map((member) => {
             const isSelf = member.user_id === currentUser?.id;
             const isOnline = onlineUsers.has(member.user_id);
             const status = memberStatuses.get(member.user_id) || 'idle';
 
-            let statusColor = 'bg-slate-800 text-slate-400 border-white/5';
+            let statusColor = 'bg-slate-800/60 text-slate-400 border-white/5';
             if (isSelf) {
               statusColor = 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20';
             } else if (status === 'connected') {
-              statusColor = 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20';
+              statusColor = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
             } else if (status === 'connecting') {
-              statusColor = 'bg-sky-500/10 text-sky-300 border-sky-500/20 animate-pulse';
+              statusColor = 'bg-sky-500/15 text-sky-300 border-sky-500/30 animate-pulse';
             } else if (isOnline) {
-              statusColor = 'bg-amber-500/10 text-amber-300 border-amber-500/20';
+              statusColor = 'bg-amber-500/15 text-amber-300 border-amber-500/30';
             }
 
             return (
@@ -147,11 +162,14 @@ export const GroupChatArea: React.FC = () => {
         </div>
       </div>
 
-      {/* Group Message Stream */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, background: '#0d1117' }} className="select-text">
+      {/* ── Group Message Stream (Scroll container with minHeight: 0) ── */}
+      <div 
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}
+        className="p-4 sm:p-6 space-y-3 bg-obsidian-950 select-text"
+      >
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12 select-none">
-            <div className="w-14 h-14 rounded-3xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-3 text-sky-400 shadow-xl">
+            <div className="w-14 h-14 rounded-3xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3 text-sky-400 shadow-xl">
               <Share2 className="w-7 h-7" />
             </div>
             <p className="text-sm font-bold text-slate-200">Host-Coordinated Full Mesh</p>
@@ -172,7 +190,7 @@ export const GroupChatArea: React.FC = () => {
         <div ref={scrollRef} />
       </div>
 
-      {/* Input */}
+      {/* ── Input ── */}
       <ChatInput
         onSendMessage={handleSendMessage}
         onSendFile={handleSendFile}

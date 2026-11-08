@@ -68,6 +68,10 @@ class PeerConnectionManager {
   private streamListeners: Set<RemoteStreamHandler> = new Set();
   private fileProgressListeners: Map<string, TransferProgressCallback> = new Map();
 
+  // Screen WakeLock & Screen Sharing
+  private wakeLock: any = null;
+  private isScreenSharing: boolean = false;
+
   /**
    * Initializes the manager with current user profile.
    */
@@ -77,6 +81,45 @@ class PeerConnectionManager {
 
     // Listen to incoming signaling broadcasts
     signalingService.onMessage(this.handleSignalingPayload.bind(this));
+
+    // Setup auto-recovery on tab visibility change & network online
+    this.setupRecoveryListeners();
+  }
+
+  private setupRecoveryListeners(): void {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          console.log('[WebRTC] App visibility restored: recovering any stale connections');
+          this.recoverStaleConnections();
+        }
+      });
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        console.log('[WebRTC] Network online event: recovering peer links');
+        this.recoverStaleConnections();
+      });
+    }
+  }
+
+  private recoverStaleConnections(): void {
+    for (const [peerId, session] of this.peers.entries()) {
+      if (session.status === 'failed' || session.status === 'disconnected') {
+        console.log(`[WebRTC] Auto-reconnecting failed peer link: ${peerId}`);
+        this.connectToPeer(peerId, session.peerPublicKeyJWK || undefined, true).catch(() => {});
+      } else if (session.status === 'connected' && session.pc) {
+        if (session.pc.iceConnectionState === 'disconnected' || session.pc.iceConnectionState === 'failed') {
+          try {
+            console.log(`[WebRTC] Restarting ICE for peer: ${peerId}`);
+            session.pc.restartIce();
+          } catch {
+            this.connectToPeer(peerId, session.peerPublicKeyJWK || undefined, true).catch(() => {});
+          }
+        }
+      }
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -343,6 +386,9 @@ class PeerConnectionManager {
           }
         }
       }
+
+      // 3. Automatically flush any queued outbox messages
+      await this.flushOutbox(peerUserId);
     };
 
     channel.onclose = () => {
@@ -456,9 +502,34 @@ class PeerConnectionManager {
         // Save directly to local IndexedDB (never sent to server!)
         await localDb.saveMessage(localMsg);
 
+        // Send ACK back so sender gets delivery confirmation (double checkmark ✓✓)
+        if (session?.dataChannel?.readyState === 'open') {
+          session.dataChannel.send(JSON.stringify({
+            type: 'MESSAGE_ACK',
+            id: 'ack_' + packet.id,
+            senderId: this.currentUserId!,
+            ackMessageId: packet.id,
+            timestamp: Date.now()
+          }));
+        }
+
         // Notify UI listeners
         for (const listener of this.messageListeners) {
           listener(localMsg);
+        }
+        break;
+      }
+
+      case 'MESSAGE_ACK': {
+        const ackId = packet.ackMessageId || (packet.id?.startsWith('ack_') ? packet.id.substring(4) : packet.id);
+        if (ackId) {
+          await localDb.updateMessageStatus(ackId, 'delivered');
+          const msg = await localDb.messages.get(ackId);
+          if (msg) {
+            for (const listener of this.messageListeners) {
+              listener({ ...msg, status: 'delivered' });
+            }
+          }
         }
         break;
       }
@@ -561,8 +632,29 @@ class PeerConnectionManager {
   async sendMessage(peerUserId: string, content: string): Promise<LocalMessage> {
     const session = await this.ensureConnectedSession(peerUserId);
 
+    // If channel is not currently open, queue in local IndexedDB outbox
     if (!session.dataChannel || session.dataChannel.readyState !== 'open') {
-      throw new Error('Direct P2P DataChannel is not open. Check connectivity status.');
+      const messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const queuedMsg: LocalMessage = {
+        id: messageId,
+        conversationId: peerUserId,
+        senderId: this.currentUserId!,
+        senderName: this.currentUserName,
+        type: 'text',
+        content,
+        status: 'queued',
+        timestamp: Date.now(),
+        isE2EE: true
+      };
+
+      await localDb.saveMessage(queuedMsg);
+
+      // Trigger connection if not already in progress
+      if (session.status !== 'connecting' && session.status !== 'signaling') {
+        this.connectToPeer(peerUserId).catch(() => {});
+      }
+
+      return queuedMsg;
     }
 
     const { publicKeyJWK } = await cryptoService.getOrCreateDeviceKeypair();
@@ -622,6 +714,58 @@ class PeerConnectionManager {
 
     await localDb.saveMessage(localMsg);
     return localMsg;
+  }
+
+  /**
+   * Flushes any messages queued in IndexedDB outbox when DataChannel opens.
+   */
+  async flushOutbox(peerUserId: string): Promise<void> {
+    const session = this.peers.get(peerUserId);
+    if (!session?.dataChannel || session.dataChannel.readyState !== 'open') return;
+
+    try {
+      const queuedMessages = await localDb.getQueuedMessages(peerUserId);
+      if (!queuedMessages || queuedMessages.length === 0) return;
+
+      console.log(`[WebRTC Outbox] Flushing ${queuedMessages.length} pending message(s) to ${peerUserId}`);
+      const { publicKeyJWK } = await cryptoService.getOrCreateDeviceKeypair();
+
+      for (const msg of queuedMessages) {
+        let ciphertext = '';
+        let iv = '';
+        let isE2EE = false;
+
+        if (session.sharedKey) {
+          const enc = await cryptoService.encryptText(msg.content, session.sharedKey);
+          ciphertext = enc.ciphertext;
+          iv = enc.iv;
+          isE2EE = true;
+        } else {
+          ciphertext = btoa(msg.content);
+        }
+
+        const packet: WirePacket = {
+          type: 'CHAT_MESSAGE',
+          id: msg.id,
+          senderId: this.currentUserId!,
+          timestamp: msg.timestamp,
+          ciphertext,
+          iv: iv || undefined,
+          publicKeyJWK
+        };
+
+        session.dataChannel.send(JSON.stringify(packet));
+        await localDb.updateMessageStatus(msg.id, 'sent');
+        msg.status = 'sent';
+        msg.isE2EE = isE2EE;
+
+        for (const listener of this.messageListeners) {
+          listener(msg);
+        }
+      }
+    } catch (err) {
+      console.warn(`[WebRTC Outbox] Error flushing outbox for ${peerUserId}:`, err);
+    }
   }
 
   /**
@@ -739,6 +883,7 @@ class PeerConnectionManager {
   ): Promise<void> {
     // 1. Acquire local media with echo cancellation and auto-gain
     this.localMediaStream = await this.acquireUserMedia(callType);
+    await this.acquireWakeLock();
 
     this.activeCall = {
       active: true,
@@ -792,6 +937,7 @@ class PeerConnectionManager {
     // 1. Acquire local media with fallback
     try {
       this.localMediaStream = await this.acquireUserMedia(actualType);
+      await this.acquireWakeLock();
     } catch (err: any) {
       console.error('Media permission denied:', err);
       this.rejectCall();
@@ -887,6 +1033,9 @@ class PeerConnectionManager {
       this.localMediaStream = null;
     }
 
+    this.releaseWakeLock();
+    this.isScreenSharing = false;
+
     this.remoteStreams.clear();
     this.activeCall = {
       active: false,
@@ -924,6 +1073,141 @@ class PeerConnectionManager {
       return this.activeCall.isVideoOff;
     }
     return false;
+  }
+
+  private async acquireWakeLock(): Promise<void> {
+    if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+      try {
+        this.wakeLock = await (navigator as any).wakeLock.request('screen');
+        console.log('[WebRTC Call] Screen WakeLock acquired successfully');
+      } catch (err) {
+        console.warn('[WebRTC Call] Screen WakeLock request rejected:', err);
+      }
+    }
+  }
+
+  private releaseWakeLock(): void {
+    if (this.wakeLock) {
+      try {
+        this.wakeLock.release();
+        console.log('[WebRTC Call] Screen WakeLock released');
+      } catch (err) {
+        console.warn('[WebRTC Call] Screen WakeLock release warning:', err);
+      }
+      this.wakeLock = null;
+    }
+  }
+
+  async flipCamera(): Promise<boolean> {
+    if (!this.localMediaStream || this.activeCall.callType !== 'video') return false;
+    const currentVideoTrack = this.localMediaStream.getVideoTracks()[0];
+    if (!currentVideoTrack) return false;
+
+    const currentFacing = currentVideoTrack.getSettings().facingMode;
+    const targetFacing = currentFacing === 'environment' ? 'user' : 'environment';
+
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: targetFacing } }
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return false;
+
+      // Replace track on all active peer senders
+      for (const session of this.peers.values()) {
+        const senders = session.pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newVideoTrack);
+        }
+      }
+
+      currentVideoTrack.stop();
+      this.localMediaStream.removeTrack(currentVideoTrack);
+      this.localMediaStream.addTrack(newVideoTrack);
+      this.notifyCallStateChange();
+      return true;
+    } catch (err) {
+      console.warn('[Call] Camera flip error:', err);
+      return false;
+    }
+  }
+
+  async toggleScreenShare(): Promise<boolean> {
+    if (!this.localMediaStream) return false;
+    const currentVideoTrack = this.localMediaStream.getVideoTracks()[0];
+
+    try {
+      if (this.isScreenSharing) {
+        // Revert to camera
+        const camStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' }
+        });
+        const camTrack = camStream.getVideoTracks()[0];
+        for (const session of this.peers.values()) {
+          const videoSender = session.pc.getSenders().find(s => s.track?.kind === 'video');
+          if (videoSender) await videoSender.replaceTrack(camTrack);
+        }
+        if (currentVideoTrack) {
+          currentVideoTrack.stop();
+          this.localMediaStream.removeTrack(currentVideoTrack);
+        }
+        this.localMediaStream.addTrack(camTrack);
+        this.isScreenSharing = false;
+      } else {
+        // Start screen share
+        if (!navigator.mediaDevices?.getDisplayMedia) return false;
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = displayStream.getVideoTracks()[0];
+
+        screenTrack.onended = () => {
+          this.toggleScreenShare().catch(console.warn);
+        };
+
+        for (const session of this.peers.values()) {
+          const videoSender = session.pc.getSenders().find(s => s.track?.kind === 'video');
+          if (videoSender) await videoSender.replaceTrack(screenTrack);
+        }
+
+        if (currentVideoTrack) {
+          currentVideoTrack.stop();
+          this.localMediaStream.removeTrack(currentVideoTrack);
+        }
+        this.localMediaStream.addTrack(screenTrack);
+        this.isScreenSharing = true;
+      }
+
+      this.notifyCallStateChange();
+      return this.isScreenSharing;
+    } catch (err) {
+      console.warn('[Call] Screen share toggle error:', err);
+      return false;
+    }
+  }
+
+  async getConnectionType(peerUserId: string): Promise<'lan' | 'stun' | 'offline'> {
+    const session = this.peers.get(peerUserId);
+    if (!session || session.status !== 'connected' || !session.pc) return 'offline';
+
+    try {
+      const stats = await session.pc.getStats();
+      let isHostPair = false;
+      stats.forEach(report => {
+        if (
+          report.type === 'candidate-pair' &&
+          (report.state === 'succeeded' || report.nominated)
+        ) {
+          const localCand = stats.get(report.localCandidateId);
+          const remoteCand = stats.get(report.remoteCandidateId);
+          if (localCand?.candidateType === 'host' && remoteCand?.candidateType === 'host') {
+            isHostPair = true;
+          }
+        }
+      });
+      return isHostPair ? 'lan' : 'stun';
+    } catch {
+      return 'stun';
+    }
   }
 
   getLocalMediaStream(): MediaStream | null {

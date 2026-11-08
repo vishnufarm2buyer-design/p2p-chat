@@ -74,6 +74,14 @@ export class P2PChatDatabase extends Dexie {
     await this.messages.update(id, { status });
   }
 
+  async getQueuedMessages(conversationId: string): Promise<LocalMessage[]> {
+    return await this.messages
+      .where('conversationId')
+      .equals(conversationId)
+      .filter(m => m.status === 'queued')
+      .sortBy('timestamp');
+  }
+
   async deleteMessage(id: string): Promise<void> {
     await this.messages.delete(id);
   }

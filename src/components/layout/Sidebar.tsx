@@ -19,6 +19,7 @@ import {
   X,
   Plus,
   Lock,
+  Database
 } from 'lucide-react';
 import type { LocalConversation } from '@/types';
 import { useAuth } from '@/context/AuthContext';
@@ -32,6 +33,7 @@ interface SidebarProps {
   onOpenPrivacy: () => void;
   onOpenDiagnostics: () => void;
   onOpenCreateGroup: () => void;
+  onOpenBackup: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -41,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenPrivacy,
   onOpenDiagnostics,
   onOpenCreateGroup,
+  onOpenBackup,
 }) => {
   const { currentUser, signOut } = useAuth();
   const {
@@ -68,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const pendingRequestsCount = contactRequests.incoming.length;
 
-  // PWA install prompt
+  // PWA install prompt handler
   useEffect(() => {
     const handler = (e: Event) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
@@ -83,10 +86,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (outcome === 'accepted') { setIsInstalled(true); setInstallPrompt(null); }
   };
 
-  // Refresh contacts
   useEffect(() => { refreshContacts(); }, [refreshContacts]);
 
-  // Load conversation snippets from IndexedDB
+  // Load conversation summaries from local IndexedDB
   useEffect(() => {
     let mounted = true;
     const load = () => {
@@ -102,7 +104,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return () => { mounted = false; clearInterval(iv); };
   }, []);
 
-  // Close kebab menus on outside click
   useEffect(() => {
     const handler = () => setContactMenuOpen(null);
     window.addEventListener('click', handler);
@@ -130,188 +131,190 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    // Sidebar shell: flex-col, h-100%, no overflow
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: '#161b22' }}>
-
-      {/* ── Top brand header bar ─────────────────────────────────────────────── */}
-      <div style={{
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 14px',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-        background: 'rgba(10,13,20,0.7)',
-      }}>
-        {/* Brand logo + name */}
+    <aside className="flex flex-col h-full overflow-hidden bg-obsidian-950 text-slate-100 select-none border-r border-white/[0.06]">
+      {/* ── Top Brand Header ── */}
+      <div className="shrink-0 flex items-center justify-between px-4 py-3.5 border-b border-white/[0.06] bg-obsidian-900/60 backdrop-blur-xl">
         <button
           onClick={onOpenProfile}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-          title="Profile & QR Code"
+          className="flex items-center gap-3 group cursor-pointer text-left focus:outline-none"
+          title="Cryptographic Identity & Profile"
         >
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #06b6d4, #0ea5e9, #6366f1)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 12px rgba(6,182,212,0.25)',
-          }}>
-            <ShieldCheck size={20} color="#0d1117" />
+          <div className="relative">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 via-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform duration-300">
+              <ShieldCheck className="w-5 h-5 text-slate-950" />
+            </div>
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-obsidian-950" />
           </div>
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', lineHeight: 1.2 }}>Shield P2P</div>
-            <div style={{ fontSize: 10, color: '#8b949e', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Lock size={9} color="#34d399" />
-              STUN Only · Zero Cloud
+          <div>
+            <div className="text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
+              Shield P2P
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">
+                E2EE
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5 text-emerald-400" />
+              <span>STUN Direct · Zero Cloud</span>
             </div>
           </div>
         </button>
 
-        {/* Top right action icons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {/* Action Controls */}
+        <div className="flex items-center gap-1">
           {installPrompt && !isInstalled && (
-            <button onClick={handleInstall} title="Install App"
-              style={{ padding: 7, borderRadius: 10, border: 'none', background: 'none', color: '#06b6d4', cursor: 'pointer' }}>
-              <Download size={16} />
+            <button 
+              onClick={handleInstall} 
+              title="Install Desktop/Mobile PWA"
+              className="p-2 rounded-xl text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4 animate-bounce" />
             </button>
           )}
-          <button onClick={onOpenProfile} title="My QR Code"
-            style={{ padding: 7, borderRadius: 10, border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer' }}>
-            <QrCode size={16} />
+
+          <button 
+            onClick={onOpenProfile} 
+            title="My Permanent QR Code"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+          >
+            <QrCode className="w-4 h-4" />
           </button>
-          <button onClick={onOpenRequests} title="Contact Requests"
-            style={{ position: 'relative', padding: 7, borderRadius: 10, border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer' }}>
-            <Bell size={16} />
+
+          <button 
+            onClick={onOpenRequests} 
+            title="Contact Requests"
+            className="relative p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+          >
+            <Bell className="w-4 h-4" />
             {pendingRequestsCount > 0 && (
-              <span style={{
-                position: 'absolute', top: 2, right: 2,
-                width: 16, height: 16, borderRadius: '50%',
-                background: '#06b6d4', color: '#0d1117',
-                fontSize: 9, fontWeight: 800,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
+              <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-cyan-500 text-slate-950 text-[9px] font-black flex items-center justify-center animate-pulse">
                 {pendingRequestsCount}
               </span>
             )}
           </button>
-          <button onClick={onOpenAddContact} title="Add Contact"
-            style={{ padding: 7, borderRadius: 10, border: 'none', background: 'rgba(6,182,212,0.1)', color: '#06b6d4', cursor: 'pointer' }}>
-            <UserPlus size={16} />
+
+          <button 
+            onClick={onOpenAddContact} 
+            title="Add Contact / Scan QR"
+            className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-all cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* ── Tab switcher + search ─────────────────────────────────────────────── */}
-      <div style={{ flexShrink: 0, padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* Tabs */}
-        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 3, gap: 3 }}>
+      {/* ── Segmented Control & Search ── */}
+      <div className="shrink-0 p-3 space-y-2.5 border-b border-white/[0.05] bg-obsidian-950/40">
+        {/* Modern Segmented Tab Pill */}
+        <div className="flex p-1 bg-white/[0.03] border border-white/[0.06] rounded-2xl gap-1">
           <button
             onClick={() => setActiveTab('direct')}
-            style={{
-              flex: 1, padding: '6px 8px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-              background: activeTab === 'direct' ? 'linear-gradient(135deg, #06b6d4, #0ea5e9)' : 'transparent',
-              color: activeTab === 'direct' ? '#0d1117' : '#8b949e',
-              transition: 'all 0.15s',
-            }}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              activeTab === 'direct'
+                ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-md font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            <MessageSquare size={12} />
-            Chats ({contacts.length})
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Chats ({contacts.length})</span>
           </button>
+
           <button
             onClick={() => setActiveTab('groups')}
-            style={{
-              flex: 1, padding: '6px 8px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-              background: activeTab === 'groups' ? 'linear-gradient(135deg, #06b6d4, #0ea5e9)' : 'transparent',
-              color: activeTab === 'groups' ? '#0d1117' : '#8b949e',
-              transition: 'all 0.15s',
-            }}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              activeTab === 'groups'
+                ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-md font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            <Users size={12} />
-            Groups ({groups.length})
+            <Users className="w-3.5 h-3.5" />
+            <span>Groups ({groups.length})</span>
           </button>
+
           {activeTab === 'direct' ? (
-            <button onClick={onOpenAddContact} title="Add Contact"
-              style={{ padding: '6px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'rgba(6,182,212,0.08)', color: '#06b6d4' }}>
-              <UserPlus size={13} />
+            <button
+              onClick={onOpenAddContact}
+              title="Add Contact"
+              className="px-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-all cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <button onClick={onOpenCreateGroup} title="Create Group"
-              style={{ padding: '6px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'rgba(14,165,233,0.08)', color: '#0ea5e9' }}>
-              <Plus size={13} />
+            <button
+              onClick={onOpenCreateGroup}
+              title="Create Mesh Group"
+              className="px-2.5 rounded-xl bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 border border-sky-500/20 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        {/* Search */}
-        <div style={{ position: 'relative' }}>
-          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#8b949e', pointerEvents: 'none' }} />
+        {/* Search Bar */}
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={activeTab === 'direct' ? 'Search contacts or ID...' : 'Search groups...'}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, paddingTop: 7, paddingBottom: 7,
-              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)',
-              borderRadius: 8, outline: 'none', fontSize: 12, color: '#e6edf3',
-            }}
+            className="w-full pl-9 pr-8 py-2 bg-white/[0.03] hover:bg-white/[0.05] focus:bg-white/[0.06] border border-white/[0.06] focus:border-cyan-500/50 rounded-xl text-xs text-white placeholder:text-slate-500 outline-none transition-all"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')}
-              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#8b949e', display: 'flex' }}>
-              <X size={12} />
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        {/* Filter chips for direct tab */}
+        {/* Filter chips (Direct Chats) */}
         {activeTab === 'direct' && (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="flex items-center gap-1.5 pt-0.5">
             <button
               onClick={() => setFilterMode('all')}
-              style={{
-                padding: '3px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600,
-                background: filterMode === 'all' ? 'rgba(255,255,255,0.1)' : 'transparent',
-                color: filterMode === 'all' ? '#e6edf3' : '#8b949e',
-              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                filterMode === 'all'
+                  ? 'bg-white/10 text-white font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
               All ({contacts.length})
             </button>
             <button
               onClick={() => setFilterMode('online')}
-              style={{
-                padding: '3px 10px', borderRadius: 6, border: `1px solid ${filterMode === 'online' ? 'rgba(52,211,153,0.4)' : 'transparent'}`, cursor: 'pointer', fontSize: 10, fontWeight: 600,
-                background: filterMode === 'online' ? 'rgba(52,211,153,0.08)' : 'transparent',
-                color: filterMode === 'online' ? '#34d399' : '#8b949e',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                filterMode === 'online'
+                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
-              Online ({contacts.filter(c => onlineUsers.has(c.contact_id)).length})
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Online ({contacts.filter(c => onlineUsers.has(c.contact_id)).length})</span>
             </button>
           </div>
         )}
       </div>
 
-      {/* ── Scrollable list ─────────────────────────────────────────────────────
-           CRITICAL: flex:1 + minHeight:0 makes it shrink and scroll correctly  */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* ── Scrollable Contact / Group List ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
         {activeTab === 'direct' ? (
           filteredContacts.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, textAlign: 'center', color: '#8b949e' }}>
-              <div style={{ width: 48, height: 48, borderRadius: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, color: '#06b6d4' }}>
-                <MessageSquare size={22} />
+            <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-400 my-auto">
+              <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3 text-cyan-400 shadow-md">
+                <MessageSquare className="w-5 h-5" />
               </div>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9', margin: '0 0 4px' }}>
-                {searchQuery ? 'No matches' : filterMode === 'online' ? 'No contacts online' : 'No contacts yet'}
+              <p className="text-xs font-bold text-slate-200">
+                {searchQuery ? 'No matching contacts' : filterMode === 'online' ? 'No contacts online' : 'No contacts yet'}
               </p>
-              <p style={{ fontSize: 11, margin: '0 0 16px', maxWidth: 200 }}>
-                {searchQuery ? 'Try a different query.' : 'Share your QR code or enter a friend\'s public ID.'}
+              <p className="text-[11px] text-slate-400 max-w-xs mt-1">
+                {searchQuery ? 'Try another search term.' : 'Share your permanent QR code or add a friend via Public ID.'}
               </p>
-              <button onClick={onOpenAddContact}
-                style={{ padding: '8px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'linear-gradient(135deg,#06b6d4,#0ea5e9)', color: '#0d1117' }}>
+              <button
+                onClick={onOpenAddContact}
+                className="mt-4 px-4 py-2 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+              >
                 + Add Contact
               </button>
             </div>
@@ -326,91 +329,127 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div
                   key={contact.contact_id}
                   onClick={() => selectDirectChat(contact)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 10px',
-                    borderRadius: 12, cursor: 'pointer', transition: 'background 0.15s',
-                    background: isSelected ? 'rgba(6,182,212,0.12)' : 'transparent',
-                    borderLeft: isSelected ? '3px solid #06b6d4' : '3px solid transparent',
-                    position: 'relative',
-                  }}
-                  className="contact-row"
-                  onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
-                  onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                  className={`group relative p-2.5 rounded-2xl transition-all duration-150 cursor-pointer flex items-center gap-3 ${
+                    isSelected
+                      ? 'bg-gradient-to-r from-cyan-500/15 via-sky-500/10 to-transparent border-l-3 border-cyan-400 shadow-sm'
+                      : 'hover:bg-white/[0.04]'
+                  }`}
                 >
-                  {/* Avatar */}
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 13, background: 'linear-gradient(135deg,#0891b2,#0ea5e9,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#0d1117', overflow: 'hidden' }}>
+                  {/* Avatar & Online Dot */}
+                  <div className="relative shrink-0">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-indigo-600 flex items-center justify-center text-sm font-black text-slate-950 overflow-hidden shadow-sm">
                       {contact.profile.avatar_data ? (
-                        <img src={contact.profile.avatar_data} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : contact.profile.display_name.substring(0, 2).toUpperCase()}
+                        <img src={contact.profile.avatar_data} alt="Avatar" className="w-full h-full object-cover" />
+                      ) : (
+                        contact.profile.display_name.substring(0, 2).toUpperCase()
+                      )}
                     </div>
-                    <span style={{
-                      position: 'absolute', bottom: -1, right: -1, width: 13, height: 13, borderRadius: '50%',
-                      border: '2px solid #161b22',
-                      background: isOnline ? '#34d399' : '#374151',
-                      boxShadow: isOnline ? '0 0 6px rgba(52,211,153,0.6)' : 'none',
-                    }} />
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-obsidian-950 transition-colors ${
+                        isOnline
+                          ? 'bg-emerald-500 shadow-sm shadow-emerald-500/80 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-600'
+                      }`}
+                    />
                   </div>
 
-                  {/* Info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
+                  {/* Info & Last Message */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <h4 className="text-xs font-bold text-white truncate max-w-[140px] sm:max-w-[160px]">
                         {contact.profile.display_name}
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {fmtTime(conv?.lastMessageTimestamp)}
                       </span>
-                      <span style={{ fontSize: 10, color: '#8b949e', flexShrink: 0 }}>{fmtTime(conv?.lastMessageTimestamp)}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-                      <span style={{ fontSize: 11, color: '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>
+
+                    <div className="flex items-center justify-between text-xs gap-2">
+                      <p className="text-slate-400 truncate text-[11px] max-w-[150px]">
                         {conv?.lastMessageText || contact.profile.public_id}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                      </p>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
                         {conv?.unreadCount && conv.unreadCount > 0 ? (
-                          <span style={{ minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: '#06b6d4', color: '#0d1117', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span className="min-w-4.5 h-4.5 px-1.5 rounded-full bg-cyan-400 text-slate-950 text-[10px] font-black flex items-center justify-center shadow-sm">
                             {conv.unreadCount}
                           </span>
                         ) : null}
+
                         {p2pStatus === 'connected' ? (
-                          <span style={{ fontSize: 9, color: '#34d399', fontWeight: 700 }}>P2P</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            P2P
+                          </span>
                         ) : isOnline ? (
-                          <span style={{ fontSize: 9, color: '#38bdf8', fontWeight: 600 }}>Online</span>
+                          <span className="text-[10px] text-sky-400 font-medium">Online</span>
                         ) : null}
                       </div>
                     </div>
                   </div>
 
-                  {/* Kebab menu */}
-                  <div style={{ position: 'relative', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                  {/* Kebab Context Options */}
+                  <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => setContactMenuOpen(contactMenuOpen === contact.contact_id ? null : contact.contact_id)}
-                      style={{ padding: 6, borderRadius: 8, border: 'none', cursor: 'pointer', background: 'none', color: '#8b949e' }}
-                      title="Options"
+                      className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer opacity-70 group-hover:opacity-100"
+                      title="Contact Options"
                     >
-                      <MoreVertical size={15} />
+                      <MoreVertical className="w-4 h-4" />
                     </button>
+
                     {contactMenuOpen === contact.contact_id && (
-                      <div style={{
-                        position: 'absolute', right: 0, top: '100%', marginTop: 4,
-                        width: 170, background: '#1c2128', border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 50,
-                        padding: '6px 0',
-                      }}>
-                        <button onClick={() => { setContactMenuOpen(null); selectDirectChat(contact); startCall('voice'); }}
-                          style={{ width: '100%', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#c9d1d9', display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-                          <Phone size={13} color="#34d399" /> Voice Call
+                      <div className="absolute right-0 mt-1 w-48 bg-obsidian-900 border border-white/10 rounded-2xl shadow-2xl py-1.5 z-40 animate-fade-in backdrop-blur-2xl">
+                        <button
+                          onClick={() => {
+                            setContactMenuOpen(null);
+                            selectDirectChat(contact);
+                            startCall('voice');
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/[0.08] flex items-center gap-2.5 cursor-pointer transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Voice Call</span>
                         </button>
-                        <button onClick={() => { setContactMenuOpen(null); selectDirectChat(contact); startCall('video'); }}
-                          style={{ width: '100%', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#c9d1d9', display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-                          <Video size={13} color="#06b6d4" /> Video Call
+
+                        <button
+                          onClick={() => {
+                            setContactMenuOpen(null);
+                            selectDirectChat(contact);
+                            startCall('video');
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-white/[0.08] flex items-center gap-2.5 cursor-pointer transition-colors"
+                        >
+                          <Video className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Video Call</span>
                         </button>
-                        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '4px 0' }} />
-                        <button onClick={async () => { setContactMenuOpen(null); if (confirm(`Remove ${contact.profile.display_name}?`)) await deleteContact(contact.contact_id); }}
-                          style={{ width: '100%', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-                          <UserMinus size={13} /> Remove Contact
+
+                        <div className="border-t border-white/[0.08] my-1" />
+
+                        <button
+                          onClick={async () => {
+                            setContactMenuOpen(null);
+                            if (confirm(`Remove ${contact.profile.display_name} from contacts?`)) {
+                              await deleteContact(contact.contact_id);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-amber-400 hover:bg-white/[0.08] flex items-center gap-2.5 cursor-pointer transition-colors"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                          <span>Remove Contact</span>
                         </button>
-                        <button onClick={async () => { setContactMenuOpen(null); if (confirm(`Block ${contact.profile.display_name}?`)) await blockContact(contact.contact_id); }}
-                          style={{ width: '100%', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#f87171', display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left' }}>
-                          <Ban size={13} /> Block Contact
+
+                        <button
+                          onClick={async () => {
+                            setContactMenuOpen(null);
+                            if (confirm(`Block ${contact.profile.display_name}? They will not be able to connect or message you.`)) {
+                              await blockContact(contact.contact_id);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-rose-400 hover:bg-white/[0.08] flex items-center gap-2.5 cursor-pointer transition-colors"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>Block Contact</span>
                         </button>
                       </div>
                     )}
@@ -421,14 +460,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )
         ) : (
           filteredGroups.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, textAlign: 'center', color: '#8b949e' }}>
-              <div style={{ width: 48, height: 48, borderRadius: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, color: '#0ea5e9' }}>
-                <Users size={22} />
+            <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-400 my-auto">
+              <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3 text-sky-400 shadow-md">
+                <Users className="w-5 h-5" />
               </div>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9', margin: '0 0 4px' }}>No mesh groups</p>
-              <p style={{ fontSize: 11, margin: '0 0 16px', maxWidth: 200 }}>Create a host-coordinated mesh group with your contacts.</p>
-              <button onClick={onOpenCreateGroup}
-                style={{ padding: '8px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: '#0ea5e9', color: '#0d1117' }}>
+              <p className="text-xs font-bold text-slate-200">No mesh groups</p>
+              <p className="text-[11px] text-slate-400 max-w-xs mt-1">
+                Create a host-coordinated mesh group with your accepted contacts.
+              </p>
+              <button
+                onClick={onOpenCreateGroup}
+                className="mt-4 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+              >
                 + New Group
               </button>
             </div>
@@ -436,34 +479,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             filteredGroups.map((group) => {
               const isSelected = selectedChat?.id === group.id;
               const conv = conversations.get(group.id);
+
               return (
                 <div
                   key={group.id}
                   onClick={() => selectGroupChat(group)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 10px',
-                    borderRadius: 12, cursor: 'pointer', transition: 'background 0.15s',
-                    background: isSelected ? 'rgba(14,165,233,0.12)' : 'transparent',
-                    borderLeft: isSelected ? '3px solid #0ea5e9' : '3px solid transparent',
-                  }}
-                  onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
-                  onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                  className={`p-2.5 rounded-2xl transition-all duration-150 cursor-pointer flex items-center gap-3 ${
+                    isSelected
+                      ? 'bg-gradient-to-r from-sky-500/15 via-indigo-500/10 to-transparent border-l-3 border-sky-400 shadow-sm'
+                      : 'hover:bg-white/[0.04]'
+                  }`}
                 >
-                  <div style={{ width: 42, height: 42, borderRadius: 13, background: 'linear-gradient(135deg,#0369a1,#4f46e5,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Users size={18} color="white" />
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-sky-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+                    <Users className="w-5 h-5" />
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {group.name}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <h4 className="text-xs font-bold text-white truncate">{group.name}</h4>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {fmtTime(conv?.lastMessageTimestamp)}
                       </span>
-                      <span style={{ fontSize: 10, color: '#8b949e', flexShrink: 0 }}>{fmtTime(conv?.lastMessageTimestamp)}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 11, color: '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div className="flex items-center justify-between text-xs">
+                      <p className="text-slate-400 truncate text-[11px]">
                         {conv?.lastMessageText || `${group.members.length} members`}
+                      </p>
+                      <span className="text-[10px] text-sky-400 font-semibold shrink-0">
+                        Mesh
                       </span>
-                      <span style={{ fontSize: 9, color: '#38bdf8', fontWeight: 600, flexShrink: 0 }}>Mesh</span>
                     </div>
                   </div>
                 </div>
@@ -473,42 +517,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* ── Bottom utility bar ─────────────────────────────────────────────────── */}
-      <div style={{
-        flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 12px',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
-        background: 'rgba(10,13,20,0.5)',
-      }}>
-        {/* User avatar pill */}
+      {/* ── Bottom Utility Dock ── */}
+      <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-t border-white/[0.06] bg-obsidian-900/50 backdrop-blur-xl">
         {currentUser && (
-          <button onClick={onOpenProfile} title={`${currentUser.display_name} — Profile`}
-            style={{ position: 'relative', padding: 2, borderRadius: '50%', border: '2px solid rgba(6,182,212,0.3)', cursor: 'pointer', background: 'none', display: 'flex' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#06b6d4,#0ea5e9)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#0d1117', overflow: 'hidden' }}>
-              {currentUser.avatar_data ? (
-                <img src={currentUser.avatar_data} alt="Me" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : currentUser.display_name.substring(0, 2).toUpperCase()}
+          <button
+            onClick={onOpenProfile}
+            title={`${currentUser.display_name} • Click to edit profile`}
+            className="flex items-center gap-2.5 p-1 rounded-2xl hover:bg-white/[0.05] transition-colors cursor-pointer group"
+          >
+            <div className="relative">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-sky-400 flex items-center justify-center text-xs font-bold text-slate-950 overflow-hidden shadow-md">
+                {currentUser.avatar_data ? (
+                  <img src={currentUser.avatar_data} alt="Me" className="w-full h-full object-cover" />
+                ) : (
+                  currentUser.display_name.substring(0, 2).toUpperCase()
+                )}
+              </div>
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-obsidian-950" />
             </div>
-            <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: '#34d399', border: '2px solid #161b22' }} />
+            <div className="text-left hidden lg:block">
+              <p className="text-xs font-bold text-white leading-tight truncate max-w-[90px]">{currentUser.display_name}</p>
+              <p className="text-[10px] font-mono text-cyan-400">Online</p>
+            </div>
           </button>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <button onClick={onOpenDiagnostics} title="Network Diagnostics"
-            style={{ padding: 7, borderRadius: 8, border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer' }}>
-            <Activity size={15} />
+        <div className="flex items-center gap-1">
+          {/* Encrypted Backup & Device Portability */}
+          <button
+            onClick={onOpenBackup}
+            title="Encrypted Backup & Portability"
+            className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
+          >
+            <Database className="w-4 h-4" />
           </button>
-          <button onClick={onOpenPrivacy} title="Privacy & Security"
-            style={{ padding: 7, borderRadius: 8, border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer' }}>
-            <Info size={15} />
+
+          {/* STUN Network Diagnostics */}
+          <button
+            onClick={onOpenDiagnostics}
+            title="STUN Network & NAT Diagnostics"
+            className="p-2 text-slate-400 hover:text-sky-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
+          >
+            <Activity className="w-4 h-4" />
           </button>
-          <button onClick={signOut} title="Sign Out"
-            style={{ padding: 7, borderRadius: 8, border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer' }}>
-            <LogOut size={15} />
+
+          {/* Privacy Architecture Info */}
+          <button
+            onClick={onOpenPrivacy}
+            title="Privacy Transparency & Architecture"
+            className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
+          >
+            <Info className="w-4 h-4" />
+          </button>
+
+          {/* Sign Out */}
+          <button
+            onClick={signOut}
+            title="Sign Out"
+            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 };

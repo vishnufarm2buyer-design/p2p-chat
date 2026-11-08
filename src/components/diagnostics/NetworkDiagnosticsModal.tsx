@@ -7,7 +7,8 @@ import {
   ShieldCheck, 
   RefreshCw,
   Server,
-  Sparkles
+  Zap,
+  Globe
 } from 'lucide-react';
 import { createStunOnlyRtcConfiguration, DEFAULT_STUN_SERVERS } from '@/services/webrtc/stunConfig';
 
@@ -28,6 +29,7 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
   const [candidates, setCandidates] = useState<IceCandidateSummary[]>([]);
   const [stunPassed, setStunPassed] = useState<boolean | null>(null);
   const [hasRelayCandidate, setHasRelayCandidate] = useState(false);
+  const [hasHostCandidate, setHasHostCandidate] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -40,12 +42,12 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
     setCandidates([]);
     setStunPassed(null);
     setHasRelayCandidate(false);
+    setHasHostCandidate(false);
 
     try {
       const config = createStunOnlyRtcConfiguration();
       const pc = new RTCPeerConnection(config);
 
-      // Create a dummy data channel to trigger ICE candidate gathering
       pc.createDataChannel('diag-test');
 
       const foundCandidates: IceCandidateSummary[] = [];
@@ -57,6 +59,9 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
 
           if (type === 'relay') {
             setHasRelayCandidate(true);
+          }
+          if (type === 'host') {
+            setHasHostCandidate(true);
           }
 
           foundCandidates.push({
@@ -72,7 +77,6 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
             setStunPassed(true);
           }
         } else {
-          // Gathering complete
           setTesting(false);
           pc.close();
         }
@@ -81,11 +85,10 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Timeout after 6 seconds if gathering takes long
       setTimeout(() => {
         setTesting(false);
         try { pc.close(); } catch (_) {}
-      }, 6000);
+      }, 5000);
 
     } catch (err) {
       console.error('Diagnostic error:', err);
@@ -97,7 +100,7 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-lg bg-slate-950/90 border border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-lg bg-obsidian-900 border border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-5 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-white/[0.02]">
           <div className="flex items-center gap-3">
@@ -105,8 +108,8 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
               <Activity className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Network & STUN Diagnostics</h3>
-              <p className="text-xs text-slate-400">Live WebRTC ICE candidate inspection</p>
+              <h3 className="text-base font-bold text-white">Network &amp; STUN Diagnostics</h3>
+              <p className="text-xs text-slate-400">Real-time WebRTC NAT Traversal &amp; LAN Check</p>
             </div>
           </div>
           <button
@@ -119,21 +122,21 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
 
         {/* Body */}
         <div className="p-6 overflow-y-auto space-y-4 text-xs text-slate-300">
-          {/* Diagnostic Checks Status Cards */}
+          {/* Status Cards */}
           <div className="grid grid-cols-2 gap-3">
             <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
               <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                STUN NAT Discovery
+                STUN Public Traversal
               </span>
               <div className="flex items-center gap-1.5 font-bold text-sm">
                 {testing ? (
-                  <span className="text-amber-400 animate-pulse">Gathering...</span>
+                  <span className="text-amber-400 animate-pulse">Probing STUN...</span>
                 ) : stunPassed ? (
                   <span className="text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 className="w-4 h-4" /> Operational
                   </span>
                 ) : (
-                  <span className="text-slate-400">Host Candidates</span>
+                  <span className="text-slate-400">Host Gathered</span>
                 )}
               </div>
             </div>
@@ -148,11 +151,24 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
                     <ShieldCheck className="w-4 h-4" /> Verified (No TURN)
                   </span>
                 ) : (
-                  <span className="text-red-400 flex items-center gap-1">
+                  <span className="text-rose-400 flex items-center gap-1">
                     <AlertTriangle className="w-4 h-4" /> Relay Detected
                   </span>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* LAN Discovery Notice */}
+          <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-start gap-3">
+            <Zap className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-cyan-300">Direct Local LAN Discovery</p>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {hasHostCandidate 
+                  ? 'Local network host candidates available. If your peer is connected to the same Wi-Fi, connection occurs instantly over your LAN at gigabit speeds with zero internet bandwidth.'
+                  : 'Host candidates are being discovered for local network connectivity.'}
+              </p>
             </div>
           </div>
 
@@ -203,7 +219,9 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
                           cand.type === 'srflx'
                             ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                            : 'bg-white/[0.06] text-slate-400'
+                            : cand.type === 'host'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-white/[0.06] text-slate-400'
                         }`}
                       >
                         {cand.type}
@@ -218,10 +236,6 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
               )}
             </div>
           </div>
-
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            <code>srflx</code> (server-reflexive) candidates demonstrate that STUN is successfully discovering public IP/port bindings for direct NAT traversal. Relay candidates are omitted by design, ensuring zero intermediary eavesdropping.
-          </p>
         </div>
 
         {/* Footer */}

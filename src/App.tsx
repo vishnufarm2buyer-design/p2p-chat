@@ -11,6 +11,7 @@ import { ContactRequestsModal } from '@/components/contacts/ContactRequestsModal
 import { CreateGroupModal } from '@/components/group/CreateGroupModal';
 import { PrivacyModal } from '@/components/privacy/PrivacyModal';
 import { NetworkDiagnosticsModal } from '@/components/diagnostics/NetworkDiagnosticsModal';
+import { BackupModal } from '@/components/backup/BackupModal';
 import { IncomingCallDialog } from '@/components/call/IncomingCallDialog';
 import { CallOverlay } from '@/components/call/CallOverlay';
 import { ShieldCheck, Loader2 } from 'lucide-react';
@@ -32,6 +33,7 @@ const Dashboard: React.FC = () => {
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [isPrivacyOpen,     setIsPrivacyOpen]     = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [isBackupOpen,      setIsBackupOpen]      = useState(false);
 
   // Detect mobile viewport
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -49,6 +51,7 @@ const Dashboard: React.FC = () => {
     onOpenPrivacy:     () => setIsPrivacyOpen(true),
     onOpenDiagnostics: () => setIsDiagnosticsOpen(true),
     onOpenCreateGroup: () => setIsCreateGroupOpen(true),
+    onOpenBackup:      () => setIsBackupOpen(true),
   };
 
   const chatOpen = selectedChat !== null;
@@ -100,6 +103,7 @@ const Dashboard: React.FC = () => {
       <CreateGroupModal     isOpen={isCreateGroupOpen} onClose={() => setIsCreateGroupOpen(false)} />
       <PrivacyModal         isOpen={isPrivacyOpen}     onClose={() => setIsPrivacyOpen(false)} />
       <NetworkDiagnosticsModal isOpen={isDiagnosticsOpen} onClose={() => setIsDiagnosticsOpen(false)} />
+      <BackupModal          isOpen={isBackupOpen}      onClose={() => setIsBackupOpen(false)} />
 
       {/* ── Calling overlays ──────────────────────────────────────────────────── */}
       <IncomingCallDialog />

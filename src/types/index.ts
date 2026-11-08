@@ -73,7 +73,7 @@ export interface GroupMemberItem {
 // Local Storage (IndexedDB / Dexie.js) Types
 // ----------------------------------------------------------------------------
 export type MessageType = 'text' | 'file' | 'system' | 'call_log';
-export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'failed';
+export type MessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
 
 export interface FileMetadata {
   id: string;
@@ -173,6 +173,8 @@ export interface WirePacket {
   id: string;
   senderId: string;
   timestamp: number;
+  ackMessageId?: string; // For MESSAGE_ACK
+  sha256Hash?: string;   // For FILE_END verification
   // Encrypted payload fields (AES-GCM):
   ciphertext?: string; // base64
   iv?: string;         // base64 12-byte IV
