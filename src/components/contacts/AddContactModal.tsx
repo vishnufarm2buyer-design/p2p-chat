@@ -24,7 +24,7 @@ interface AddContactModalProps {
 
 export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClose }) => {
   const { currentUser } = useAuth();
-  const { sendContactRequestByPublicId } = useChat();
+  const { sendContactRequestByPublicId, contacts, selectDirectChat } = useChat();
 
   const [activeTab, setActiveTab] = useState<'id' | 'scan'>('id');
   const [publicIdInput, setPublicIdInput] = useState('');
@@ -260,32 +260,55 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({ isOpen, onClos
               </div>
 
               {/* Profile Preview Card */}
-              {previewProfile && (
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3 animate-fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-sky-400 flex items-center justify-center font-bold text-slate-950 text-base">
-                      {previewProfile.display_name.substring(0, 2).toUpperCase()}
+              {previewProfile && (() => {
+                const existingContact = contacts.find(
+                  c => c.contact_id === previewProfile.id || c.profile.public_id === previewProfile.public_id
+                );
+
+                return (
+                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3 animate-fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-500 to-sky-400 flex items-center justify-center font-bold text-slate-950 text-base">
+                        {previewProfile.display_name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{previewProfile.display_name}</h4>
+                        <p className="text-xs font-mono text-cyan-400">{previewProfile.public_id}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-white">{previewProfile.display_name}</h4>
-                      <p className="text-xs font-mono text-cyan-400">{previewProfile.public_id}</p>
-                    </div>
+
+                    {existingContact ? (
+                      <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/80 flex items-center justify-between text-xs text-emerald-300">
+                        <span className="font-medium">Already in your contacts!</span>
+                        <button
+                          onClick={() => {
+                            selectDirectChat(existingContact);
+                            onClose();
+                          }}
+                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs cursor-pointer shadow-md transition-all"
+                        >
+                          Open Chat
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-slate-400">
+                          Direct P2P communication can begin as soon as this user accepts your request.
+                        </p>
+
+                        <button
+                          onClick={handleSendRequest}
+                          disabled={isSending}
+                          className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                          Send Contact Request
+                        </button>
+                      </>
+                    )}
                   </div>
-
-                  <p className="text-[11px] text-slate-400">
-                    Direct P2P communication can begin as soon as this user accepts your request.
-                  </p>
-
-                  <button
-                    onClick={handleSendRequest}
-                    disabled={isSending}
-                    className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                    Send Contact Request
-                  </button>
-                </div>
-              )}
+                );
+              })()}
             </div>
           ) : (
             <div className="space-y-4">

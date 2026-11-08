@@ -99,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Network Diagnostics */}
         <button
           onClick={onOpenDiagnostics}
-          className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer"
+          className="hidden sm:inline-flex p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer"
           title="Network & STUN Diagnostics"
         >
           <Activity className="w-5 h-5" />
@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Privacy Transparency Info */}
         <button
           onClick={onOpenPrivacy}
-          className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer"
+          className="hidden sm:inline-flex p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer"
           title="Privacy Architecture Transparency"
         >
           <Info className="w-5 h-5" />

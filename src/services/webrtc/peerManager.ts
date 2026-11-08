@@ -122,6 +122,7 @@ class PeerConnectionManager {
     try {
       session.makingOffer = true;
       this.updateStatus(peerUserId, 'signaling');
+      this.startConnectionWatchdog(peerUserId);
       const offer = await session.pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
@@ -185,20 +186,19 @@ class PeerConnectionManager {
       }
     };
 
-    // Connection state changes
+    // Connection state changes with automatic self-healing recovery
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       console.log(`[WebRTC] Peer ${peerUserId} connectionState: ${state}`);
       if (state === 'connected') {
+        this.clearRecoveryTimeout(peerUserId);
         this.updateStatus(peerUserId, 'connected');
       } else if (state === 'connecting') {
         this.updateStatus(peerUserId, 'connecting');
       } else if (state === 'disconnected') {
-        this.updateStatus(peerUserId, 'disconnected');
+        this.handleConnectionRecovery(peerUserId, false);
       } else if (state === 'failed') {
-        // Clear diagnostic: STUN-only traversal failed due to restrictive NAT/firewall
-        const reason = 'Direct P2P connection failed. Network NAT or firewall prevented direct traversal (Relay/TURN is strictly disabled).';
-        this.updateStatus(peerUserId, 'failed', reason);
+        this.handleConnectionRecovery(peerUserId, true);
       }
     };
 
@@ -207,10 +207,12 @@ class PeerConnectionManager {
       const iceState = pc.iceConnectionState;
       console.log(`[WebRTC] Peer ${peerUserId} iceConnectionState: ${iceState}`);
       if (iceState === 'connected' || iceState === 'completed') {
+        this.clearRecoveryTimeout(peerUserId);
         this.updateStatus(peerUserId, 'connected');
+      } else if (iceState === 'disconnected') {
+        this.handleConnectionRecovery(peerUserId, false);
       } else if (iceState === 'failed') {
-        const reason = 'Direct P2P connection failed. Network NAT or firewall prevented direct traversal (Relay/TURN is strictly disabled).';
-        this.updateStatus(peerUserId, 'failed', reason);
+        this.handleConnectionRecovery(peerUserId, true);
       }
     };
 
@@ -671,24 +673,45 @@ class PeerConnectionManager {
   // --------------------------------------------------------------------------
   // Voice & Video Calling (WebRTC MediaStream)
   // --------------------------------------------------------------------------
+  private async acquireUserMedia(callType: 'voice' | 'video'): Promise<MediaStream> {
+    const audioConstraints: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    };
+
+    if (callType === 'voice') {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: false
+      });
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 }
+        }
+      });
+    } catch (err) {
+      console.warn('[WebRTC] Preferred HD video constraints failed, using fallback:', err);
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: true
+      });
+    }
+  }
+
   async startCall(
     peerUserId: string, 
     callType: 'voice' | 'video',
     peerDisplayName: string
   ): Promise<void> {
     // 1. Acquire local media with echo cancellation and auto-gain
-    this.localMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      },
-      video: callType === 'video' ? {
-        facingMode: 'user',
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      } : false
-    });
+    this.localMediaStream = await this.acquireUserMedia(callType);
 
     this.activeCall = {
       active: true,
@@ -696,7 +719,7 @@ class PeerConnectionManager {
       isIncoming: false,
       remoteUserId: peerUserId,
       remoteUserName: peerDisplayName,
-      status: 'initiating',
+      status: 'ringing',
       isMuted: false,
       isVideoOff: false,
       startedAt: Date.now()
@@ -720,29 +743,9 @@ class PeerConnectionManager {
           if (sender) sender.replaceTrack(track).catch(console.warn);
         }
       }
-
-      // Create and send SDP offer with audio/video media descriptors
-      try {
-        session.makingOffer = true;
-        const offer = await session.pc.createOffer();
-        await session.pc.setLocalDescription(offer);
-        await signalingService.sendSignal({
-          type: 'offer',
-          senderId: this.currentUserId!,
-          targetId: peerUserId,
-          sessionId: 'call_' + Date.now(),
-          sdp: offer,
-          callType,
-          timestamp: Date.now()
-        });
-      } catch (err) {
-        console.warn('Call offer error:', err);
-      } finally {
-        session.makingOffer = false;
-      }
     }
 
-    // 3. Send call invitation signal
+    // 3. Send call invitation signal (DO NOT create offer yet; wait for receiver acceptance to prevent glare)
     await signalingService.sendSignal({
       type: 'call-invite',
       senderId: this.currentUserId!,
@@ -751,9 +754,6 @@ class PeerConnectionManager {
       callType,
       timestamp: Date.now()
     });
-
-    this.activeCall.status = 'ringing';
-    this.notifyCallStateChange();
   }
 
   async acceptCall(callType?: 'voice' | 'video'): Promise<void> {
@@ -762,20 +762,9 @@ class PeerConnectionManager {
     const actualType = callType || this.activeCall.callType;
     const remoteId = this.activeCall.remoteUserId;
 
-    // 1. Acquire local media with echo cancellation
+    // 1. Acquire local media with fallback
     try {
-      this.localMediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: actualType === 'video' ? {
-          facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } : false
-      });
+      this.localMediaStream = await this.acquireUserMedia(actualType);
     } catch (err: any) {
       console.error('Media permission denied:', err);
       this.rejectCall();
@@ -805,36 +794,15 @@ class PeerConnectionManager {
       }
     }
 
-    // 3. Send acceptance signal
+    // 3. Send acceptance signal (Caller will create the clean renegotiation offer)
     await signalingService.sendSignal({
       type: 'call-accept',
       senderId: this.currentUserId!,
       targetId: remoteId,
       sessionId: 'call_' + Date.now(),
+      callType: actualType,
       timestamp: Date.now()
     });
-
-    // 4. Send renegotiation offer to establish two-way media flow
-    if (session) {
-      try {
-        session.makingOffer = true;
-        const offer = await session.pc.createOffer();
-        await session.pc.setLocalDescription(offer);
-        await signalingService.sendSignal({
-          type: 'offer',
-          senderId: this.currentUserId!,
-          targetId: remoteId,
-          sessionId: 'call_offer_' + Date.now(),
-          sdp: offer,
-          callType: actualType,
-          timestamp: Date.now()
-        });
-      } catch (err) {
-        console.warn('[WebRTC] Error sending renegotiation offer in acceptCall:', err);
-      } finally {
-        session.makingOffer = false;
-      }
-    }
   }
 
   async rejectCall(): Promise<void> {
@@ -1029,11 +997,6 @@ class PeerConnectionManager {
         const session = this.peers.get(peerUserId);
         if (!session) return;
 
-        if (session.ignoreOffer) {
-          session.ignoreOffer = false;
-          return;
-        }
-
         if (session.pc.signalingState === 'stable') {
           console.warn(`[WebRTC] Received answer for ${peerUserId} while already stable; ignoring.`);
           return;
@@ -1198,6 +1161,9 @@ class PeerConnectionManager {
   }
 
   private updateStatus(peerUserId: string, status: PeerConnectionStatus, errorReason?: string): void {
+    if (status === 'connected' || status === 'failed' || status === 'idle') {
+      this.clearWatchdog(peerUserId);
+    }
     const session = this.peers.get(peerUserId);
     if (session) {
       session.status = status;
@@ -1216,6 +1182,8 @@ class PeerConnectionManager {
   }
 
   closePeerSession(peerUserId: string): void {
+    this.clearRecoveryTimeout(peerUserId);
+    this.clearWatchdog(peerUserId);
     const session = this.peers.get(peerUserId);
     if (session) {
       if (session.dataChannel) {
@@ -1227,6 +1195,83 @@ class PeerConnectionManager {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Connection Self-Healing & Automatic Recovery
+  // --------------------------------------------------------------------------
+  private recoveryTimeouts: Map<string, any> = new Map();
+  private watchdogTimers: Map<string, any> = new Map();
+
+  private clearWatchdog(peerUserId: string): void {
+    const timer = this.watchdogTimers.get(peerUserId);
+    if (timer) {
+      clearTimeout(timer);
+      this.watchdogTimers.delete(peerUserId);
+    }
+  }
+
+  private startConnectionWatchdog(peerUserId: string): void {
+    this.clearWatchdog(peerUserId);
+    const timer = setTimeout(() => {
+      this.watchdogTimers.delete(peerUserId);
+      const session = this.peers.get(peerUserId);
+      if (session && (session.status === 'signaling' || session.status === 'connecting')) {
+        console.warn(`[WebRTC Watchdog] Connection timeout for ${peerUserId}. Initiating recovery...`);
+        this.handleConnectionRecovery(peerUserId, false);
+      }
+    }, 12000);
+    this.watchdogTimers.set(peerUserId, timer);
+  }
+
+  private clearRecoveryTimeout(peerUserId: string): void {
+    const existing = this.recoveryTimeouts.get(peerUserId);
+    if (existing) {
+      clearTimeout(existing);
+      this.recoveryTimeouts.delete(peerUserId);
+    }
+  }
+
+  private handleConnectionRecovery(peerUserId: string, isFailed: boolean = false): void {
+    if (this.recoveryTimeouts.has(peerUserId)) return;
+
+    const session = this.peers.get(peerUserId);
+    if (!session) return;
+
+    console.log(`[WebRTC] Initiating automatic connection recovery for ${peerUserId} (failed: ${isFailed})...`);
+    this.updateStatus(peerUserId, 'connecting');
+
+    const timeout = setTimeout(async () => {
+      this.recoveryTimeouts.delete(peerUserId);
+      const current = this.peers.get(peerUserId);
+      if (!current || current.status === 'connected') return;
+
+      try {
+        if ('restartIce' in current.pc && !isFailed) {
+          console.log(`[WebRTC] Attempting ICE restart for ${peerUserId}...`);
+          current.pc.restartIce();
+          current.makingOffer = true;
+          const offer = await current.pc.createOffer({ iceRestart: true });
+          await current.pc.setLocalDescription(offer);
+          await signalingService.sendSignal({
+            type: 'offer',
+            senderId: this.currentUserId!,
+            targetId: peerUserId,
+            sessionId: 'restart_' + Date.now(),
+            sdp: offer,
+            timestamp: Date.now()
+          });
+        } else {
+          console.log(`[WebRTC] Performing full connection recovery restart for ${peerUserId}...`);
+          await this.retryPeerConnection(peerUserId);
+        }
+      } catch (err: any) {
+        console.warn(`[WebRTC] Recovery attempt failed for ${peerUserId}:`, err);
+        this.updateStatus(peerUserId, 'failed', 'Direct P2P connection failed. Network NAT or firewall prevented direct traversal (Relay/TURN is strictly disabled).');
+      }
+    }, 1500);
+
+    this.recoveryTimeouts.set(peerUserId, timeout);
+  }
+
   async retryPeerConnection(peerUserId: string): Promise<void> {
     console.log(`[WebRTC] Retrying direct P2P connection to ${peerUserId}...`);
     this.closePeerSession(peerUserId);
@@ -1235,6 +1280,9 @@ class PeerConnectionManager {
 
   cleanup(): void {
     this.endCall();
+    for (const [peerId] of this.watchdogTimers) {
+      this.clearWatchdog(peerId);
+    }
     for (const [peerId, _] of this.peers) {
       this.closePeerSession(peerId);
     }

@@ -1,5 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
+import { localDb } from '../db';
 import type { SignalingPayload } from '@/types';
 
 // ============================================================================
@@ -301,8 +302,12 @@ class SignalingService {
     if (payload.targetId && payload.targetId !== this.currentUserId) return;
 
     // Deduplicate identical packets received within a short window
-    const candidateId = payload.candidate ? `${payload.candidate.candidate?.substring(0, 30)}` : '';
-    const dedupeKey = `${payload.type}:${payload.senderId}:${payload.sessionId || ''}:${payload.timestamp}:${candidateId}`;
+    let dedupeKey: string;
+    if (payload.type === 'ice-candidate') {
+      dedupeKey = `ice:${payload.senderId}:${payload.candidate?.candidate || ''}:${payload.candidate?.sdpMLineIndex ?? ''}`;
+    } else {
+      dedupeKey = `${payload.type}:${payload.senderId}:${payload.sessionId || ''}:${payload.timestamp}`;
+    }
     if (this.processedSignals.has(dedupeKey)) return;
     this.processedSignals.add(dedupeKey);
 
@@ -311,13 +316,28 @@ class SignalingService {
       this.processedSignals.delete(oldest);
     }
 
-    for (const handler of this.messageHandlers) {
-      try {
-        handler(payload);
-      } catch (err) {
-        console.error('Error in signaling message handler:', err);
+    // Drop signals from blocked users
+    localDb.isUserBlocked(payload.senderId).then((isBlocked) => {
+      if (isBlocked) {
+        console.log(`[Signaling] Ignored signal from blocked user ${payload.senderId}`);
+        return;
       }
-    }
+      for (const handler of this.messageHandlers) {
+        try {
+          handler(payload);
+        } catch (err) {
+          console.error('Error in signaling message handler:', err);
+        }
+      }
+    }).catch(() => {
+      for (const handler of this.messageHandlers) {
+        try {
+          handler(payload);
+        } catch (err) {
+          console.error('Error in signaling message handler:', err);
+        }
+      }
+    });
   }
 
   private notifyPresenceChange(): void {

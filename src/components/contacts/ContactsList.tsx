@@ -3,7 +3,12 @@ import {
   Search, 
   UserPlus, 
   Users, 
-  MessageSquare
+  MessageSquare,
+  MoreVertical,
+  Phone,
+  Video,
+  UserMinus,
+  Ban
 } from 'lucide-react';
 import type { LocalConversation } from '@/types';
 import { useChat } from '@/context/ChatContext';
@@ -26,12 +31,16 @@ export const ContactsList: React.FC<ContactsListProps> = ({
     selectGroupChat, 
     onlineUsers, 
     peerStatuses,
-    refreshContacts 
+    refreshContacts,
+    deleteContact,
+    blockContact,
+    startCall
   } = useChat();
 
   const [activeTab, setActiveTab] = useState<'direct' | 'groups'>('direct');
   const [searchQuery, setSearchQuery] = useState('');
   const [conversations, setConversations] = useState<Map<string, LocalConversation>>(new Map());
+  const [contactMenuOpen, setContactMenuOpen] = useState<string | null>(null);
 
   // Periodically refresh contacts
   useEffect(() => {
@@ -225,6 +234,73 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                       {conv.unreadCount}
                     </span>
                   ) : null}
+
+                  {/* Contact Options Kebab Menu */}
+                  <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setContactMenuOpen(contactMenuOpen === contact.contact_id ? null : contact.contact_id)}
+                      className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                      title="Contact Options"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+
+                    {contactMenuOpen === contact.contact_id && (
+                      <div className="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl py-1 z-30 animate-fade-in">
+                        <button
+                          onClick={() => {
+                            setContactMenuOpen(null);
+                            selectDirectChat(contact);
+                            startCall('voice');
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Voice Call</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setContactMenuOpen(null);
+                            selectDirectChat(contact);
+                            startCall('video');
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Video className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Video Call</span>
+                        </button>
+
+                        <div className="border-t border-slate-800/80 my-1" />
+
+                        <button
+                          onClick={async () => {
+                            setContactMenuOpen(null);
+                            if (confirm(`Remove ${contact.profile.display_name} from contacts?`)) {
+                              await deleteContact(contact.contact_id);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-amber-400 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                          <span>Remove Contact</span>
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            setContactMenuOpen(null);
+                            if (confirm(`Block ${contact.profile.display_name}? They will not be able to connect or message you.`)) {
+                              await blockContact(contact.contact_id);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>Block Contact</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })

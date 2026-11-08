@@ -5,7 +5,8 @@ import {
   MicOff, 
   Video, 
   VideoOff, 
-  Lock 
+  Lock,
+  Volume2
 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
 
@@ -22,6 +23,7 @@ export const CallOverlay: React.FC = () => {
   const [callSeconds, setCallSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(activeCall.isMuted);
   const [isVideoOff, setIsVideoOff] = useState(activeCall.isVideoOff);
+  const [needsAudioGesture, setNeedsAudioGesture] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -41,22 +43,24 @@ export const CallOverlay: React.FC = () => {
   useEffect(() => {
     if (!remoteStream || !isActive) return;
 
-    if (activeCall.callType === 'video') {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-        remoteVideoRef.current.play().catch(e => {
-          console.warn('Remote video element play error, trying audio fallback:', e);
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch(console.warn);
-          }
-        });
-      }
-    } else {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = remoteStream;
-        remoteAudioRef.current.play().catch(e => console.warn('Remote audio play warning:', e));
-      }
+    // 1. Audio element should ALWAYS play the audio track
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.play().then(() => {
+        setNeedsAudioGesture(false);
+      }).catch(e => {
+        console.warn('[WebRTC Audio] Remote audio element play error:', e);
+        setNeedsAudioGesture(true);
+      });
+    }
+
+    // 2. Video element handles video track
+    if (activeCall.callType === 'video' && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(e => {
+        console.warn('[WebRTC Video] Remote video element play error:', e);
+      });
     }
   }, [remoteStream, activeCall.callType, isActive]);
 
@@ -97,10 +101,27 @@ export const CallOverlay: React.FC = () => {
   const isVideo = activeCall.callType === 'video';
   const isConnected = activeCall.status === 'connected';
 
+  const handleUnlockAudio = () => {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.play().then(() => setNeedsAudioGesture(false)).catch(console.warn);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col justify-between p-4 sm:p-6 animate-fade-in select-none">
       {/* Hidden audio element for voice calls */}
       <audio ref={remoteAudioRef} autoPlay playsInline />
+
+      {/* Autoplay Fallback Unlocker Banner */}
+      {needsAudioGesture && (
+        <button 
+          onClick={handleUnlockAudio}
+          className="fixed top-18 left-1/2 -translate-x-1/2 z-50 bg-cyan-400 hover:bg-cyan-300 text-slate-950 px-5 py-2.5 rounded-full font-bold text-xs shadow-2xl cursor-pointer animate-bounce flex items-center gap-2 border-2 border-white"
+        >
+          <Volume2 className="w-4 h-4 animate-pulse" />
+          <span>Tap here to enable call audio</span>
+        </button>
+      )}
 
       {/* Top Status Bar */}
       <div className="flex items-center justify-between z-20">

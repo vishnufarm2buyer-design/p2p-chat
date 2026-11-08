@@ -464,10 +464,18 @@ class SupabaseService {
   async removeContact(userId: string, contactId: string): Promise<boolean> {
     if (!isConfigured) return true;
 
+    // Delete current user's contact record (guaranteed by RLS auth.uid() = user_id)
     const { error } = await supabase
       .from('contacts')
       .delete()
-      .or(`and(user_id.eq.${userId},contact_id.eq.${contactId}),and(user_id.eq.${contactId},contact_id.eq.${userId})`);
+      .eq('user_id', userId)
+      .eq('contact_id', contactId);
+
+    // Also remove any pending contact requests between the two users
+    await supabase
+      .from('contact_requests')
+      .delete()
+      .or(`and(sender_id.eq.${userId},receiver_id.eq.${contactId}),and(sender_id.eq.${contactId},receiver_id.eq.${userId})`);
 
     return !error;
   }

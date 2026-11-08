@@ -142,6 +142,33 @@ export class P2PChatDatabase extends Dexie {
     const record = await this.settings.get(key);
     return record?.value as T | undefined;
   }
+
+  // --------------------------------------------------------------------------
+  // Blocked Users Management (Local Privacy Enforcement)
+  // --------------------------------------------------------------------------
+  async getBlockedUsers(): Promise<string[]> {
+    const list = await this.getSetting<string[]>('blocked_users');
+    return list || [];
+  }
+
+  async blockUser(userId: string): Promise<void> {
+    const list = await this.getBlockedUsers();
+    if (!list.includes(userId)) {
+      list.push(userId);
+      await this.setSetting('blocked_users', list);
+    }
+  }
+
+  async unblockUser(userId: string): Promise<void> {
+    const list = await this.getBlockedUsers();
+    const filtered = list.filter(id => id !== userId);
+    await this.setSetting('blocked_users', filtered);
+  }
+
+  async isUserBlocked(userId: string): Promise<boolean> {
+    const list = await this.getBlockedUsers();
+    return list.includes(userId);
+  }
 }
 
 // Singleton database instance

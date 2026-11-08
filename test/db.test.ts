@@ -103,4 +103,19 @@ describe('IndexedDB Local History Storage (Dexie.js)', () => {
     const conv = await localDb.conversations.get(peerId);
     expect(conv?.lastMessageText).toBe('[Conversation cleared]');
   });
+
+  it('blocks, unblocks, and verifies blocked users in local IndexedDB', async () => {
+    const blockedTarget = 'bad_actor_99';
+    expect(await localDb.isUserBlocked(blockedTarget)).toBe(false);
+
+    await localDb.blockUser(blockedTarget);
+    expect(await localDb.isUserBlocked(blockedTarget)).toBe(true);
+
+    const list = await localDb.getBlockedUsers();
+    expect(list).toContain(blockedTarget);
+
+    await localDb.unblockUser(blockedTarget);
+    expect(await localDb.isUserBlocked(blockedTarget)).toBe(false);
+    expect((await localDb.getBlockedUsers()).length).toBe(0);
+  });
 });

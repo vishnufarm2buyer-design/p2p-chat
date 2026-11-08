@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { 
   ContactItem, 
   ContactRequest, 
@@ -47,6 +47,9 @@ interface ChatContextType {
   acceptRequest: (req: ContactRequest) => Promise<boolean>;
   rejectRequest: (req: ContactRequest) => Promise<boolean>;
   deleteContact: (contactId: string) => Promise<boolean>;
+  blockContact: (contactId: string) => Promise<boolean>;
+  unblockContact: (contactId: string) => Promise<boolean>;
+  blockedUsers: string[];
   createGroup: (name: string, memberIds: string[]) => Promise<GroupItem | null>;
   sendMessage: (content: string) => Promise<LocalMessage | null>;
   sendFile: (file: File) => Promise<LocalMessage | null>;
@@ -78,6 +81,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [peerStatuses, setPeerStatuses] = useState<Record<string, PeerConnectionStatus>>({});
   const [peerErrors, setPeerErrors] = useState<Record<string, string>>({});
   const [typingUsers, setTypingUsers] = useState<Record<string, boolean>>({});
+  const [blockedUsers, setBlockedUsers] = useState<string[]>([]);
 
   // Calling
   const [activeCall, setActiveCall] = useState<ActiveCallState>(peerManager.getActiveCall());
@@ -87,10 +91,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // --------------------------------------------------------------------------
   // Data Loaders
   // --------------------------------------------------------------------------
+  const refreshBlockedUsers = useCallback(async () => {
+    const list = await localDb.getBlockedUsers();
+    setBlockedUsers(list);
+  }, []);
+
   const refreshContacts = useCallback(async () => {
     if (!currentUser) return;
     const items = await supabaseService.fetchContacts(currentUser.id);
-    setContacts(items);
+    const blockedList = await localDb.getBlockedUsers();
+    // Filter out any contacts that have been blocked
+    setContacts(items.filter(c => !blockedList.includes(c.contact_id)));
   }, [currentUser]);
 
   const refreshRequests = useCallback(async () => {
@@ -107,6 +118,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (currentUser) {
+      refreshBlockedUsers();
       refreshContacts();
       refreshRequests();
       refreshGroups();
@@ -121,6 +133,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [currentUser, refreshContacts, refreshRequests, refreshGroups]);
 
+  const selectedChatRef = useRef<SelectedChat | null>(null);
+  selectedChatRef.current = selectedChat;
+
   // --------------------------------------------------------------------------
   // Realtime Presence & WebRTC Event Bindings
   // --------------------------------------------------------------------------
@@ -130,6 +145,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Presence updates
     const unbindPresence = signalingService.onPresenceChange((onlineSet) => {
       setOnlineUsers(new Set(onlineSet));
+
+      // Auto-reconnect if current open direct chat contact just appeared online
+      if (selectedChatRef.current?.type === 'direct') {
+        const activePeerId = selectedChatRef.current.id;
+        if (onlineSet.has(activePeerId)) {
+          const status = peerManager.getPeerStatus(activePeerId);
+          if (status !== 'connected' && status !== 'connecting' && status !== 'signaling') {
+            console.log(`[Presence] Active peer ${activePeerId} came online, establishing P2P WebRTC...`);
+            peerManager.connectToPeer(activePeerId).catch(console.warn);
+          }
+        }
+      }
     });
 
     // P2P Status updates
@@ -163,12 +190,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    // Auto-reconnect on visibility change or network return
+    const handleVisibilityOrOnline = () => {
+      if (document.visibilityState === 'visible' && selectedChatRef.current?.type === 'direct') {
+        const contactId = selectedChatRef.current.id;
+        const status = peerManager.getPeerStatus(contactId);
+        if (status === 'disconnected' || status === 'failed') {
+          console.log('[WebRTC] App restored to foreground/online, retrying connection to:', contactId);
+          peerManager.retryPeerConnection(contactId).catch(console.warn);
+        }
+      }
+    };
+
+    window.addEventListener('online', handleVisibilityOrOnline);
+    document.addEventListener('visibilitychange', handleVisibilityOrOnline);
+
     return () => {
       unbindPresence();
       unbindStatus();
       unbindTyping();
       unbindCall();
       unbindStream();
+      window.removeEventListener('online', handleVisibilityOrOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
     };
   }, [currentUser, activeCall.remoteUserId]);
 
@@ -185,23 +229,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     localDb.resetUnreadCount(contact.contact_id);
 
-    // Auto-establish direct P2P connection if online
-    if (signalingService.isUserOnline(contact.contact_id) && currentUser) {
-      if (currentUser.id < contact.contact_id) {
-        // Designated initiator creates the initial WebRTC offer
-        peerManager.connectToPeer(contact.contact_id).catch(err => {
-          console.warn('Initial P2P connection attempt:', err);
-        });
-      } else {
-        // Peer pings the initiator so initiator connects
-        signalingService.sendSignal({
-          type: 'connect-ping',
-          senderId: currentUser.id,
-          targetId: contact.contact_id,
-          sessionId: 'ping_' + Date.now(),
-          timestamp: Date.now()
-        }).catch(console.warn);
-      }
+    // Auto-establish direct P2P connection immediately
+    if (currentUser) {
+      peerManager.connectToPeer(contact.contact_id).catch(err => {
+        console.warn('Initial P2P connection attempt:', err);
+      });
     }
   }, [currentUser]);
 
@@ -304,6 +336,30 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return ok;
   }, [currentUser, selectedChat, refreshContacts]);
 
+  const blockContact = useCallback(async (contactId: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    // 1. Save to local block list
+    await localDb.blockUser(contactId);
+    // 2. Remove from Supabase contacts table
+    await supabaseService.removeContact(currentUser.id, contactId);
+    // 3. Close any active WebRTC session
+    peerManager.closePeerSession(contactId);
+    if (selectedChat?.id === contactId) {
+      setSelectedChat(null);
+    }
+    // 4. Refresh state
+    await refreshBlockedUsers();
+    await refreshContacts();
+    return true;
+  }, [currentUser, selectedChat, refreshBlockedUsers, refreshContacts]);
+
+  const unblockContact = useCallback(async (contactId: string): Promise<boolean> => {
+    await localDb.unblockUser(contactId);
+    await refreshBlockedUsers();
+    await refreshContacts();
+    return true;
+  }, [refreshBlockedUsers, refreshContacts]);
+
   const createGroup = useCallback(async (name: string, memberIds: string[]): Promise<GroupItem | null> => {
     if (!currentUser) return null;
     const grp = await supabaseService.createGroup(currentUser.id, name, memberIds);
@@ -365,6 +421,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       acceptRequest,
       rejectRequest,
       deleteContact,
+      blockContact,
+      unblockContact,
+      blockedUsers,
       createGroup,
       sendMessage,
       sendFile,
