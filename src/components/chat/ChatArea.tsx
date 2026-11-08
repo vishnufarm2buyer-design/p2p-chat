@@ -25,7 +25,9 @@ import { useAuth } from '@/context/AuthContext';
 import { localDb } from '@/services/db';
 import { peerManager } from '@/services/webrtc/peerManager';
 
-export const ChatArea: React.FC = () => {
+// ChatArea props kept for backward compat (modalHandlers passed from App but not used here)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const ChatArea: React.FC<Record<string, any>> = () => {
   const { currentUser } = useAuth();
   const { 
     selectedChat, 
@@ -148,7 +150,7 @@ export const ChatArea: React.FC = () => {
   // Zero-state placeholder when no conversation is selected
   if (!selectedChat) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center bg-ambient-mesh relative overflow-hidden select-none">
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 48px', textAlign: 'center', overflow: 'hidden', background: '#0d1117' }} className="select-none">
         <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-cyan-500/20 via-sky-500/10 to-indigo-500/20 border border-cyan-500/30 flex items-center justify-center mb-6 text-cyan-400 shadow-2xl shadow-cyan-500/10">
           <ShieldCheck className="w-10 h-10 animate-pulse" />
         </div>
@@ -187,7 +189,7 @@ export const ChatArea: React.FC = () => {
   const isConnecting = connectionStatus === 'connecting' || connectionStatus === 'signaling';
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative select-none">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: '#0d1117', position: 'relative' }} className="select-none">
       {/* Top Chat Header */}
       <div className="h-16 border-b border-white/[0.06] bg-slate-950/80 backdrop-blur-2xl px-3 sm:px-6 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -383,7 +385,7 @@ export const ChatArea: React.FC = () => {
       )}
 
       {/* Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-ambient-mesh">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, background: '#0d1117' }}>
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12">
             <div className="w-14 h-14 rounded-3xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-3 text-cyan-400 shadow-xl">

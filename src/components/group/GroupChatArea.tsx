@@ -81,7 +81,7 @@ export const GroupChatArea: React.FC = () => {
   const totalMeshLines = Math.floor((totalMembers * (totalMembers - 1)) / 2);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative select-none">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: '#0d1117', position: 'relative' }} className="select-none">
       {/* Group Header */}
       <div className="border-b border-white/[0.06] bg-slate-950/80 backdrop-blur-2xl px-3.5 sm:px-6 py-3 flex flex-col justify-center z-20 shrink-0">
         <div className="flex items-center justify-between">
@@ -148,7 +148,7 @@ export const GroupChatArea: React.FC = () => {
       </div>
 
       {/* Group Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-ambient-mesh select-text">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, background: '#0d1117' }} className="select-text">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12 select-none">
             <div className="w-14 h-14 rounded-3xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-3 text-sky-400 shadow-xl">
