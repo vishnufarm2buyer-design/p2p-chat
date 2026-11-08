@@ -4,17 +4,21 @@ import './index.css';
 import App from './App';
 import { registerSW } from 'virtual:pwa-register';
 
-// Register PWA Service Worker for App Shell Asset Caching
-// Note: Private conversations and communication data are strictly NEVER cached in SW.
-const updateSW = registerSW({
+// Register PWA Service Worker for seamless background caching & automatic updates
+registerSW({
+  immediate: true,
   onNeedRefresh() {
-    if (confirm('A new version of Shield P2P is available. Reload to update?')) {
-      updateSW(true);
-    }
+    console.log('[PWA] Auto-updating service worker to latest deployment...');
   },
   onOfflineReady() {
-    console.log('P2P Shield Chat is ready for offline app shell execution.');
+    console.log('[PWA] Application shell ready for offline use.');
   }
+});
+
+// Auto-recover if an outdated cached chunk hash is requested after a new Vercel deployment
+window.addEventListener('vite:preloadError', (event) => {
+  console.warn('[PWA] Outdated chunk requested after deployment, auto-refreshing...', event);
+  window.location.reload();
 });
 
 createRoot(document.getElementById('root')!).render(

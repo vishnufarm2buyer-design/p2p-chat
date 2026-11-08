@@ -27,7 +27,13 @@ class CryptoService {
       return { publicKeyJWK: this.localPublicKeyJWK, privateKey: this.localPrivateKey };
     }
 
-    const stored = await localDb.getDeviceKeypair();
+    let stored: DeviceKeypairRecord | undefined;
+    try {
+      stored = await localDb.getDeviceKeypair();
+    } catch (err) {
+      console.warn('Could not read keypair from localDb:', err);
+    }
+
     if (stored) {
       try {
         const privateKey = await crypto.subtle.importKey(
@@ -65,7 +71,11 @@ class CryptoService {
       createdAt: Date.now()
     };
 
-    await localDb.saveDeviceKeypair(record);
+    try {
+      await localDb.saveDeviceKeypair(record);
+    } catch (err) {
+      console.warn('Could not save keypair to localDb:', err);
+    }
 
     this.localPrivateKey = keyPair.privateKey;
     this.localPublicKeyJWK = publicJWKStr;

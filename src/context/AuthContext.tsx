@@ -27,19 +27,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
-    // Safety fallback: Never keep user stuck on loading splash for more than 2.5s
+    // Safety fallback: Never keep user stuck on loading splash for more than 2s
     const safetyTimer = setTimeout(() => {
       if (mounted) setLoading(false);
-    }, 2500);
+    }, 2000);
 
     async function initAuth() {
       try {
+        // Clean URL if stale OAuth error parameters are present
+        if (window.location.hash.includes('error=') || window.location.search.includes('error=')) {
+          console.warn('Clearing OAuth error from URL');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         const user = await supabaseService.getCurrentSessionUser();
         if (user && mounted) {
           // Load local avatar from IndexedDB (never server!)
-          const localAvatar = await localDb.getSetting<string>('my_avatar');
-          if (localAvatar) {
-            user.avatar_data = localAvatar;
+          try {
+            const localAvatar = await localDb.getSetting<string>('my_avatar');
+            if (localAvatar) user.avatar_data = localAvatar;
+          } catch (e) {
+            console.warn('Avatar read error:', e);
           }
 
           setCurrentUser(user);

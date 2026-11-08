@@ -36,6 +36,9 @@ export default defineConfig({
         ]
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // Cache application shell static assets ONLY.
         // STRICTLY NO caching of private conversations, signaling, or user communication data.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
