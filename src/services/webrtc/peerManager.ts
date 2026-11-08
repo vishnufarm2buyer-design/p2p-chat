@@ -222,14 +222,48 @@ class PeerConnectionManager {
 
     // Incoming MediaStream Tracks (Voice & Video)
     pc.ontrack = (event) => {
+      console.log(`[WebRTC] Incoming media track from ${peerUserId}: ${event.track.kind}`);
       let stream = this.remoteStreams.get(peerUserId);
       if (!stream) {
-        stream = new MediaStream();
+        if (event.streams && event.streams[0]) {
+          stream = event.streams[0];
+        } else {
+          stream = new MediaStream();
+        }
         this.remoteStreams.set(peerUserId, stream);
       }
-      stream.addTrack(event.track);
+
+      if (!stream.getTracks().some(t => t.id === event.track.id)) {
+        stream.addTrack(event.track);
+      }
+
       for (const listener of this.streamListeners) {
         listener(peerUserId, stream);
+      }
+    };
+
+    // Auto-renegotiation when media tracks are added/removed
+    pc.onnegotiationneeded = async () => {
+      if (session.status !== 'connected' && session.status !== 'signaling') return;
+      try {
+        console.log(`[WebRTC] Renegotiation needed for ${peerUserId}`);
+        session.makingOffer = true;
+        const offer = await pc.createOffer();
+        if (pc.signalingState !== 'stable') return;
+        await pc.setLocalDescription(offer);
+        await signalingService.sendSignal({
+          type: 'offer',
+          senderId: this.currentUserId!,
+          targetId: peerUserId,
+          sessionId: 'reneg_' + Date.now(),
+          sdp: offer,
+          callType: this.activeCall.callType,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        console.warn('[WebRTC] Negotiation needed error:', err);
+      } finally {
+        session.makingOffer = false;
       }
     };
 
@@ -642,10 +676,18 @@ class PeerConnectionManager {
     callType: 'voice' | 'video',
     peerDisplayName: string
   ): Promise<void> {
-    // 1. Acquire local media
+    // 1. Acquire local media with echo cancellation and auto-gain
     this.localMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: callType === 'video'
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: callType === 'video' ? {
+        facingMode: 'user',
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      } : false
     });
 
     this.activeCall = {
@@ -663,24 +705,41 @@ class PeerConnectionManager {
 
     // 2. Connect or attach tracks to peer connection
     let session = this.peers.get(peerUserId);
-    if (!session || session.status !== 'connected') {
+    if (!session || session.status === 'failed' || session.status === 'disconnected') {
       session = await this.connectToPeer(peerUserId);
-    } else {
-      // Add tracks to existing connection and renegotiate
+    }
+
+    if (session && this.localMediaStream) {
+      const senders = session.pc.getSenders();
       for (const track of this.localMediaStream.getTracks()) {
-        session.pc.addTrack(track, this.localMediaStream);
+        const alreadyAdded = senders.some(s => s.track?.id === track.id || s.track?.kind === track.kind);
+        if (!alreadyAdded) {
+          session.pc.addTrack(track, this.localMediaStream);
+        } else {
+          const sender = senders.find(s => s.track?.kind === track.kind);
+          if (sender) sender.replaceTrack(track).catch(console.warn);
+        }
       }
-      const offer = await session.pc.createOffer();
-      await session.pc.setLocalDescription(offer);
-      await signalingService.sendSignal({
-        type: 'offer',
-        senderId: this.currentUserId!,
-        targetId: peerUserId,
-        sessionId: 'call_' + Date.now(),
-        sdp: offer,
-        callType,
-        timestamp: Date.now()
-      });
+
+      // Create and send SDP offer with audio/video media descriptors
+      try {
+        session.makingOffer = true;
+        const offer = await session.pc.createOffer();
+        await session.pc.setLocalDescription(offer);
+        await signalingService.sendSignal({
+          type: 'offer',
+          senderId: this.currentUserId!,
+          targetId: peerUserId,
+          sessionId: 'call_' + Date.now(),
+          sdp: offer,
+          callType,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        console.warn('Call offer error:', err);
+      } finally {
+        session.makingOffer = false;
+      }
     }
 
     // 3. Send call invitation signal
@@ -701,12 +760,21 @@ class PeerConnectionManager {
     if (!this.activeCall.active || !this.activeCall.remoteUserId) return;
 
     const actualType = callType || this.activeCall.callType;
+    const remoteId = this.activeCall.remoteUserId;
 
-    // 1. Acquire local media
+    // 1. Acquire local media with echo cancellation
     try {
       this.localMediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: actualType === 'video'
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: actualType === 'video' ? {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } : false
       });
     } catch (err: any) {
       console.error('Media permission denied:', err);
@@ -719,10 +787,21 @@ class PeerConnectionManager {
     this.notifyCallStateChange();
 
     // 2. Attach tracks to peer connection
-    const session = this.peers.get(this.activeCall.remoteUserId);
+    let session = this.peers.get(remoteId);
+    if (!session || session.status === 'failed' || session.status === 'disconnected') {
+      session = await this.connectToPeer(remoteId);
+    }
+
     if (session && this.localMediaStream) {
+      const senders = session.pc.getSenders();
       for (const track of this.localMediaStream.getTracks()) {
-        session.pc.addTrack(track, this.localMediaStream);
+        const alreadyAdded = senders.some(s => s.track?.id === track.id || s.track?.kind === track.kind);
+        if (!alreadyAdded) {
+          session.pc.addTrack(track, this.localMediaStream);
+        } else {
+          const sender = senders.find(s => s.track?.kind === track.kind);
+          if (sender) sender.replaceTrack(track).catch(console.warn);
+        }
       }
     }
 
@@ -730,10 +809,32 @@ class PeerConnectionManager {
     await signalingService.sendSignal({
       type: 'call-accept',
       senderId: this.currentUserId!,
-      targetId: this.activeCall.remoteUserId,
+      targetId: remoteId,
       sessionId: 'call_' + Date.now(),
       timestamp: Date.now()
     });
+
+    // 4. Send renegotiation offer to establish two-way media flow
+    if (session) {
+      try {
+        session.makingOffer = true;
+        const offer = await session.pc.createOffer();
+        await session.pc.setLocalDescription(offer);
+        await signalingService.sendSignal({
+          type: 'offer',
+          senderId: this.currentUserId!,
+          targetId: remoteId,
+          sessionId: 'call_offer_' + Date.now(),
+          sdp: offer,
+          callType: actualType,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        console.warn('[WebRTC] Error sending renegotiation offer in acceptCall:', err);
+      } finally {
+        session.makingOffer = false;
+      }
+    }
   }
 
   async rejectCall(): Promise<void> {
@@ -1009,6 +1110,29 @@ class PeerConnectionManager {
           this.activeCall.status = 'connected';
           this.activeCall.startedAt = Date.now();
           this.notifyCallStateChange();
+
+          // Caller ensures its tracks are renegotiated with receiver
+          const session = this.peers.get(peerUserId);
+          if (session && this.localMediaStream) {
+            try {
+              session.makingOffer = true;
+              const offer = await session.pc.createOffer();
+              await session.pc.setLocalDescription(offer);
+              await signalingService.sendSignal({
+                type: 'offer',
+                senderId: this.currentUserId!,
+                targetId: peerUserId,
+                sessionId: 'call_ack_' + Date.now(),
+                sdp: offer,
+                callType: this.activeCall.callType,
+                timestamp: Date.now()
+              });
+            } catch (err) {
+              console.warn('[WebRTC] Error in caller renegotiation after call-accept:', err);
+            } finally {
+              session.makingOffer = false;
+            }
+          }
         }
         break;
       }

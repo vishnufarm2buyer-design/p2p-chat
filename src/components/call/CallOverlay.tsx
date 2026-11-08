@@ -33,16 +33,30 @@ export const CallOverlay: React.FC = () => {
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(e => console.warn('Local video play warning:', e));
     }
   }, [localStream, isActive]);
 
-  // Attach remote stream to video or audio tag
+  // Attach remote stream to video and audio tags with explicit play()
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && activeCall.callType === 'video') {
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-    if (remoteAudioRef.current && remoteStream && activeCall.callType === 'voice') {
-      remoteAudioRef.current.srcObject = remoteStream;
+    if (!remoteStream || !isActive) return;
+
+    if (activeCall.callType === 'video') {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRef.current.play().catch(e => {
+          console.warn('Remote video element play error, trying audio fallback:', e);
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch(console.warn);
+          }
+        });
+      }
+    } else {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.play().catch(e => console.warn('Remote audio play warning:', e));
+      }
     }
   }, [remoteStream, activeCall.callType, isActive]);
 
