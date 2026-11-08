@@ -186,12 +186,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localDb.resetUnreadCount(contact.contact_id);
 
     // Auto-establish direct P2P connection if online
-    if (signalingService.isUserOnline(contact.contact_id)) {
-      peerManager.connectToPeer(contact.contact_id).catch(err => {
-        console.warn('Initial P2P connection attempt:', err);
-      });
+    if (signalingService.isUserOnline(contact.contact_id) && currentUser) {
+      if (currentUser.id < contact.contact_id) {
+        // Designated initiator creates the initial WebRTC offer
+        peerManager.connectToPeer(contact.contact_id).catch(err => {
+          console.warn('Initial P2P connection attempt:', err);
+        });
+      } else {
+        // Peer pings the initiator so initiator connects
+        signalingService.sendSignal({
+          type: 'connect-ping',
+          senderId: currentUser.id,
+          targetId: contact.contact_id,
+          sessionId: 'ping_' + Date.now(),
+          timestamp: Date.now()
+        }).catch(console.warn);
+      }
     }
-  }, []);
+  }, [currentUser]);
 
   const selectGroupChat = useCallback((group: GroupItem) => {
     setSelectedChat({
@@ -241,7 +253,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [selectedChat]);
 
   const retryPeerConnection = useCallback(async (peerUserId: string) => {
-    await peerManager.connectToPeer(peerUserId);
+    await peerManager.retryPeerConnection(peerUserId);
   }, []);
 
   // --------------------------------------------------------------------------

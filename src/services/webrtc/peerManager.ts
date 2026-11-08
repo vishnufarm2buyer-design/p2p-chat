@@ -37,6 +37,8 @@ interface PeerSession {
   sharedKey: CryptoKey | null;
   peerPublicKeyJWK: string | null;
   isInitiator: boolean;
+  makingOffer: boolean;
+  ignoreOffer: boolean;
 }
 
 class PeerConnectionManager {
@@ -84,9 +86,13 @@ class PeerConnectionManager {
    * Connects to a peer over STUN-only WebRTC.
    * If already connected, returns existing session.
    */
-  async connectToPeer(peerUserId: string, peerPublicKeyJWK?: string): Promise<PeerSession> {
+  async connectToPeer(
+    peerUserId: string, 
+    peerPublicKeyJWK?: string, 
+    forceRestart: boolean = false
+  ): Promise<PeerSession> {
     const existing = this.peers.get(peerUserId);
-    if (existing && (existing.status === 'connected' || existing.status === 'connecting')) {
+    if (!forceRestart && existing && existing.status === 'connected') {
       return existing;
     }
 
@@ -114,6 +120,7 @@ class PeerConnectionManager {
 
     // Create and send SDP Offer
     try {
+      session.makingOffer = true;
       this.updateStatus(peerUserId, 'signaling');
       const offer = await session.pc.createOffer({
         offerToReceiveAudio: true,
@@ -130,8 +137,10 @@ class PeerConnectionManager {
         timestamp: Date.now()
       });
     } catch (err: any) {
-      console.error('Error creating offer for peer:', peerUserId, err);
+      console.error('[WebRTC] Error creating offer for peer:', peerUserId, err);
       this.updateStatus(peerUserId, 'failed', err.message);
+    } finally {
+      session.makingOffer = false;
     }
 
     return session;
@@ -153,7 +162,9 @@ class PeerConnectionManager {
       pendingCandidates: [],
       sharedKey: null,
       peerPublicKeyJWK: peerPublicKeyJWK || null,
-      isInitiator
+      isInitiator,
+      makingOffer: false,
+      ignoreOffer: false
     };
 
     this.peers.set(peerUserId, session);
@@ -168,6 +179,8 @@ class PeerConnectionManager {
           sessionId: 'sess_ice',
           candidate: event.candidate.toJSON(),
           timestamp: Date.now()
+        }).catch(err => {
+          console.warn('[WebRTC] ICE candidate signal delivery warning:', err);
         });
       }
     };
@@ -175,6 +188,7 @@ class PeerConnectionManager {
     // Connection state changes
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      console.log(`[WebRTC] Peer ${peerUserId} connectionState: ${state}`);
       if (state === 'connected') {
         this.updateStatus(peerUserId, 'connected');
       } else if (state === 'connecting') {
@@ -190,8 +204,12 @@ class PeerConnectionManager {
 
     // ICE Connection State
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed') {
-        const reason = 'ICE direct connectivity negotiation failed (No TURN relay configured).';
+      const iceState = pc.iceConnectionState;
+      console.log(`[WebRTC] Peer ${peerUserId} iceConnectionState: ${iceState}`);
+      if (iceState === 'connected' || iceState === 'completed') {
+        this.updateStatus(peerUserId, 'connected');
+      } else if (iceState === 'failed') {
+        const reason = 'Direct P2P connection failed. Network NAT or firewall prevented direct traversal (Relay/TURN is strictly disabled).';
         this.updateStatus(peerUserId, 'failed', reason);
       }
     };
@@ -742,8 +760,21 @@ class PeerConnectionManager {
   // --------------------------------------------------------------------------
   private async handleSignalingPayload(payload: SignalingPayload): Promise<void> {
     const peerUserId = payload.senderId;
+    if (!peerUserId || peerUserId === this.currentUserId) return;
 
     switch (payload.type) {
+      case 'connect-ping': {
+        // Deterministic initiator check: peer with smaller ID initiates
+        if (this.currentUserId! < peerUserId) {
+          const session = this.peers.get(peerUserId);
+          if (!session || session.status === 'idle' || session.status === 'failed' || session.status === 'disconnected') {
+            console.log(`[WebRTC] Received connect-ping from ${peerUserId}, initiating as designated initiator.`);
+            await this.connectToPeer(peerUserId);
+          }
+        }
+        break;
+      }
+
       case 'offer': {
         if (!payload.sdp) return;
         let session = this.peers.get(peerUserId);
@@ -751,43 +782,90 @@ class PeerConnectionManager {
           session = this.createPeerSession(peerUserId, false);
         }
 
-        await session.pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        // Perfect Negotiation Pattern:
+        // Polite peer is deterministic: e.g. currentUserId > peerUserId
+        const isPolite = this.currentUserId! > peerUserId;
+        const offerCollision = session.makingOffer || session.pc.signalingState !== 'stable';
 
-        // Drain pending ICE candidates
-        for (const candidate of session.pendingCandidates) {
-          await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+        session.ignoreOffer = !isPolite && offerCollision;
+        if (session.ignoreOffer) {
+          console.warn(`[WebRTC Glare] Collision with ${peerUserId}. Impolite peer ignores colliding offer.`);
+          return;
         }
-        session.pendingCandidates = [];
 
-        // Create and send SDP answer
-        const answer = await session.pc.createAnswer();
-        await session.pc.setLocalDescription(answer);
+        if (offerCollision && isPolite) {
+          console.log(`[WebRTC Glare] Collision with ${peerUserId}. Polite peer rolling back local offer.`);
+          try {
+            await session.pc.setLocalDescription({ type: 'rollback' });
+          } catch (e) {
+            console.warn('[WebRTC] Rollback warning:', e);
+          }
+        }
 
-        await signalingService.sendSignal({
-          type: 'answer',
-          senderId: this.currentUserId!,
-          targetId: peerUserId,
-          sessionId: payload.sessionId,
-          sdp: answer,
-          timestamp: Date.now()
-        });
+        try {
+          await session.pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 
-        this.updateStatus(peerUserId, 'connecting');
+          // Drain queued ICE candidates
+          for (const candidate of session.pendingCandidates) {
+            try {
+              await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+              console.warn('[WebRTC] Error adding queued ICE candidate:', err);
+            }
+          }
+          session.pendingCandidates = [];
+
+          // Create and send SDP answer
+          const answer = await session.pc.createAnswer();
+          await session.pc.setLocalDescription(answer);
+
+          await signalingService.sendSignal({
+            type: 'answer',
+            senderId: this.currentUserId!,
+            targetId: peerUserId,
+            sessionId: payload.sessionId,
+            sdp: answer,
+            timestamp: Date.now()
+          });
+
+          this.updateStatus(peerUserId, 'connecting');
+        } catch (err: any) {
+          console.error('[WebRTC] Error processing offer from:', peerUserId, err);
+          this.updateStatus(peerUserId, 'failed', err.message);
+        }
         break;
       }
 
       case 'answer': {
         if (!payload.sdp) return;
         const session = this.peers.get(peerUserId);
-        if (session && session.pc.signalingState !== 'stable') {
+        if (!session) return;
+
+        if (session.ignoreOffer) {
+          session.ignoreOffer = false;
+          return;
+        }
+
+        if (session.pc.signalingState === 'stable') {
+          console.warn(`[WebRTC] Received answer for ${peerUserId} while already stable; ignoring.`);
+          return;
+        }
+
+        try {
           await session.pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 
           // Drain pending candidates
           for (const candidate of session.pendingCandidates) {
-            await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+              await session.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+              console.warn('[WebRTC] Error adding queued candidate after answer:', err);
+            }
           }
           session.pendingCandidates = [];
           this.updateStatus(peerUserId, 'connecting');
+        } catch (err: any) {
+          console.error('[WebRTC] Error processing answer from:', peerUserId, err);
         }
         break;
       }
@@ -796,8 +874,14 @@ class PeerConnectionManager {
         if (!payload.candidate) return;
         const session = this.peers.get(peerUserId);
         if (session) {
-          if (session.pc.remoteDescription) {
-            await session.pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          if (session.pc.remoteDescription && session.pc.remoteDescription.type) {
+            try {
+              await session.pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            } catch (err) {
+              if (!session.ignoreOffer) {
+                console.warn('[WebRTC] Error adding ICE candidate:', err);
+              }
+            }
           } else {
             session.pendingCandidates.push(payload.candidate);
           }
@@ -930,6 +1014,12 @@ class PeerConnectionManager {
       this.peers.delete(peerUserId);
       this.updateStatus(peerUserId, 'idle');
     }
+  }
+
+  async retryPeerConnection(peerUserId: string): Promise<void> {
+    console.log(`[WebRTC] Retrying direct P2P connection to ${peerUserId}...`);
+    this.closePeerSession(peerUserId);
+    await this.connectToPeer(peerUserId, undefined, true);
   }
 
   cleanup(): void {

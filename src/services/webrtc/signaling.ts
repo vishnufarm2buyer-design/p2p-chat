@@ -20,64 +20,119 @@ class SignalingService {
   private activeSignalingChannels: Map<string, RealtimeChannel> = new Map();
   private presenceChannel: RealtimeChannel | null = null;
   private onlineUserIds: Set<string> = new Set();
+  
+  // Ready tracking for WebSocket channels
+  private isSignalingReady: boolean = false;
+  private readyResolvers: (() => void)[] = [];
+
+  // Deduplication cache
+  private processedSignals: Set<string> = new Set();
+
+  private waitUntilReady(): Promise<void> {
+    if (this.isSignalingReady) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.readyResolvers.push(resolve);
+      // Safety timeout fallback: proceed anyway after 2 seconds
+      setTimeout(() => resolve(), 2000);
+    });
+  }
+
+  private markReady(): void {
+    if (this.isSignalingReady) return;
+    this.isSignalingReady = true;
+    for (const resolve of this.readyResolvers) {
+      resolve();
+    }
+    this.readyResolvers = [];
+  }
 
   /**
    * Initializes signaling and presence for the authenticated user.
    */
   async init(userId: string, publicId: string, displayName: string): Promise<void> {
     this.currentUserId = userId;
+    this.isSignalingReady = false;
 
-    // 1. Subscribe to personal incoming notification channel
-    const notifyChannelName = `p2p:notify:${userId}`;
-    const notifyChannel = supabase.channel(notifyChannelName, {
-      config: { broadcast: { self: false } }
-    });
+    // 1. Subscribe to app-wide Ephemeral Signaling Broadcast channel
+    const signalingChannelName = 'p2p:signaling';
+    let signalingChannel = this.activeSignalingChannels.get(signalingChannelName);
 
-    notifyChannel.on('broadcast', { event: 'signal' }, (event) => {
-      const payload = event.payload as SignalingPayload;
-      this.dispatchPayload(payload);
-    });
-
-    notifyChannel.subscribe();
-    this.activeSignalingChannels.set(notifyChannelName, notifyChannel);
-
-    // 2. Subscribe to Global Presence channel
-    this.presenceChannel = supabase.channel('p2p:presence', {
-      config: {
-        presence: {
-          key: userId
-        }
-      }
-    });
-
-    this.presenceChannel
-      .on('presence', { event: 'sync' }, () => {
-        const state = this.presenceChannel?.presenceState() || {};
-        this.onlineUserIds.clear();
-        for (const key of Object.keys(state)) {
-          this.onlineUserIds.add(key);
-        }
-        this.notifyPresenceChange();
-      })
-      .on('presence', { event: 'join' }, ({ key }) => {
-        this.onlineUserIds.add(key);
-        this.notifyPresenceChange();
-      })
-      .on('presence', { event: 'leave' }, ({ key }) => {
-        this.onlineUserIds.delete(key);
-        this.notifyPresenceChange();
+    if (!signalingChannel) {
+      signalingChannel = supabase.channel(signalingChannelName, {
+        config: { broadcast: { self: false } }
       });
 
-    this.presenceChannel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await this.presenceChannel?.track({
-          userId,
-          publicId,
-          displayName,
-          onlineAt: Date.now()
+      signalingChannel.on('broadcast', { event: 'signal' }, (event) => {
+        const payload = event.payload as SignalingPayload;
+        this.dispatchPayload(payload);
+      });
+
+      signalingChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          this.markReady();
+        }
+      });
+
+      this.activeSignalingChannels.set(signalingChannelName, signalingChannel);
+    }
+
+    // 2. Subscribe to personal direct notification channel
+    const notifyChannelName = `p2p:notify:${userId}`;
+    let notifyChannel = this.activeSignalingChannels.get(notifyChannelName);
+
+    if (!notifyChannel) {
+      notifyChannel = supabase.channel(notifyChannelName, {
+        config: { broadcast: { self: false } }
+      });
+
+      notifyChannel.on('broadcast', { event: 'signal' }, (event) => {
+        const payload = event.payload as SignalingPayload;
+        this.dispatchPayload(payload);
+      });
+
+      notifyChannel.subscribe();
+      this.activeSignalingChannels.set(notifyChannelName, notifyChannel);
+    }
+
+    // 3. Subscribe to Global Presence channel
+    if (!this.presenceChannel) {
+      this.presenceChannel = supabase.channel('p2p:presence', {
+        config: {
+          presence: {
+            key: userId
+          }
+        }
+      });
+
+      this.presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const state = this.presenceChannel?.presenceState() || {};
+          this.onlineUserIds.clear();
+          for (const key of Object.keys(state)) {
+            this.onlineUserIds.add(key);
+          }
+          this.notifyPresenceChange();
+        })
+        .on('presence', { event: 'join' }, ({ key }) => {
+          this.onlineUserIds.add(key);
+          this.notifyPresenceChange();
+        })
+        .on('presence', { event: 'leave' }, ({ key }) => {
+          this.onlineUserIds.delete(key);
+          this.notifyPresenceChange();
         });
-      }
-    });
+
+      this.presenceChannel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await this.presenceChannel?.track({
+            userId,
+            publicId,
+            displayName,
+            onlineAt: Date.now()
+          });
+        }
+      });
+    }
   }
 
   /**
@@ -129,35 +184,45 @@ class SignalingService {
   }
 
   /**
-   * Sends signaling payload to target peer.
-   * Transmits via both the direct pair channel and the recipient's notification channel.
+   * Sends signaling payload to target peer over the active WebSocket broadcast.
    */
   async sendSignal(payload: SignalingPayload): Promise<void> {
     if (!this.currentUserId) return;
 
     payload.senderId = this.currentUserId;
-    payload.timestamp = Date.now();
+    payload.timestamp = payload.timestamp || Date.now();
 
-    // 1. Send to direct channel
-    const directChannelName = this.getDirectChannelName(this.currentUserId, payload.targetId);
-    let directChannel = this.activeSignalingChannels.get(directChannelName);
-    if (!directChannel) {
-      directChannel = this.joinDirectSignalingChannel(payload.targetId);
+    // Wait until WebSocket connection is fully established
+    await this.waitUntilReady();
+
+    // 1. Broadcast over the main app signaling channel
+    const mainChannel = this.activeSignalingChannels.get('p2p:signaling');
+    if (mainChannel) {
+      try {
+        await mainChannel.send({
+          type: 'broadcast',
+          event: 'signal',
+          payload
+        });
+      } catch (err) {
+        console.warn('[Signaling] Broadcast on main channel warning:', err);
+      }
     }
 
-    await directChannel.send({
-      type: 'broadcast',
-      event: 'signal',
-      payload
-    });
-
-    // 2. Also send to notify channel so the peer picks it up even if not already in the direct room
-    const notifyChannel = supabase.channel(`p2p:notify:${payload.targetId}`);
-    await notifyChannel.send({
-      type: 'broadcast',
-      event: 'signal',
-      payload
-    });
+    // 2. Also send over direct pair channel if already active
+    const directChannelName = this.getDirectChannelName(this.currentUserId, payload.targetId);
+    const directChannel = this.activeSignalingChannels.get(directChannelName);
+    if (directChannel && directChannel !== mainChannel) {
+      try {
+        await directChannel.send({
+          type: 'broadcast',
+          event: 'signal',
+          payload
+        });
+      } catch (err) {
+        // Non-critical fallback
+      }
+    }
   }
 
   /**
@@ -217,6 +282,8 @@ class SignalingService {
     this.messageHandlers.clear();
     this.presenceHandlers.clear();
     this.onlineUserIds.clear();
+    this.processedSignals.clear();
+    this.isSignalingReady = false;
   }
 
   private getDirectChannelName(userId1: string, userId2: string): string {
@@ -225,8 +292,25 @@ class SignalingService {
   }
 
   private dispatchPayload(payload: SignalingPayload): void {
+    if (!payload || !payload.type) return;
+
+    // Never process our own echo
+    if (payload.senderId === this.currentUserId) return;
+
     // Only process signals intended for current user or broadcast mesh
     if (payload.targetId && payload.targetId !== this.currentUserId) return;
+
+    // Deduplicate identical packets received within a short window
+    const candidateId = payload.candidate ? `${payload.candidate.candidate?.substring(0, 30)}` : '';
+    const dedupeKey = `${payload.type}:${payload.senderId}:${payload.sessionId || ''}:${payload.timestamp}:${candidateId}`;
+    if (this.processedSignals.has(dedupeKey)) return;
+    this.processedSignals.add(dedupeKey);
+
+    if (this.processedSignals.size > 300) {
+      const [oldest] = this.processedSignals;
+      this.processedSignals.delete(oldest);
+    }
+
     for (const handler of this.messageHandlers) {
       try {
         handler(payload);

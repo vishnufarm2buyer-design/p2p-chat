@@ -134,6 +134,7 @@ export type SignalingSignalType =
   | 'offer' 
   | 'answer' 
   | 'ice-candidate' 
+  | 'connect-ping'
   | 'call-invite' 
   | 'call-accept' 
   | 'call-reject' 
