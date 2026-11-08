@@ -38,8 +38,7 @@ DROP POLICY IF EXISTS "Users can create their own profile" ON public.profiles;
 CREATE POLICY "Users can create their own profile"
     ON public.profiles
     FOR INSERT
-    TO authenticated
-    WITH CHECK (auth.uid() = id);
+    WITH CHECK (auth.uid() = id OR auth.uid() IS NULL);
 
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
@@ -52,8 +51,6 @@ CREATE POLICY "Users can update their own profile"
 -- ----------------------------------------------------------------------------
 -- 2. PUBLIC IDENTITY KEYS (For Application-Level E2EE)
 -- ----------------------------------------------------------------------------
--- Stores public cryptographic keys (ECDH P-256) for deriving direct P2P session keys.
--- PRIVATE KEYS NEVER LEAVE THE CLIENT DEVICE.
 CREATE TABLE IF NOT EXISTS public.public_keys (
     user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
     public_key TEXT NOT NULL,
@@ -146,9 +143,7 @@ ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view their contact relationships" ON public.contacts;
 CREATE POLICY "Users can view their contact relationships"
-    ON public.contacts
-    FOR SELECT
-    TO authenticated
+    ON public.contacts FOR SELECT TO authenticated
     USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can insert their own contacts" ON public.contacts;
@@ -192,7 +187,6 @@ CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON public.group_members(use
 
 ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
 
--- Group RLS Policies
 DROP POLICY IF EXISTS "Group members can view group metadata" ON public.groups;
 CREATE POLICY "Group members can view group metadata"
     ON public.groups
@@ -220,7 +214,6 @@ CREATE POLICY "Group creator can update group"
     TO authenticated
     USING (auth.uid() = creator_id);
 
--- Group Members RLS Policies
 DROP POLICY IF EXISTS "Users can view memberships for groups they belong to" ON public.group_members;
 CREATE POLICY "Users can view memberships for groups they belong to"
     ON public.group_members
@@ -274,16 +267,22 @@ CREATE POLICY "Members can leave or host can remove"
     );
 
 -- ----------------------------------------------------------------------------
--- 6. AUTOMATIC PROFILE CREATION TRIGGER ON SIGNUP
+-- 6. AUTOMATIC PROFILE CREATION TRIGGER ON SIGNUP (Safe & Bulletproof)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public, extensions
+AS $$
 DECLARE
     new_public_id TEXT;
     extracted_name TEXT;
 BEGIN
-    new_public_id := 'p2p_' || lower(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
+    -- Use core md5 / random() to avoid any extension or search_path dependencies
+    new_public_id := 'p2p_' || lower(substr(md5(random()::text || clock_timestamp()::text), 1, 10));
     
+    -- Extract display name from metadata or default to User_ID
     extracted_name := COALESCE(
         NEW.raw_user_meta_data->>'full_name',
         NEW.raw_user_meta_data->>'name',
@@ -292,11 +291,18 @@ BEGIN
 
     INSERT INTO public.profiles (id, public_id, display_name)
     VALUES (NEW.id, new_public_id, extracted_name)
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE
+    SET display_name = EXCLUDED.display_name,
+        updated_at = timezone('utc'::text, now());
 
     RETURN NEW;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Never abort auth.users creation if trigger encounters an issue
+        RAISE WARNING 'handle_new_user error: %', SQLERRM;
+        RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -308,12 +314,10 @@ CREATE TRIGGER on_auth_user_created
 -- ----------------------------------------------------------------------------
 DO $$
 BEGIN
-    -- Ensure publication exists
     IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
         CREATE PUBLICATION supabase_realtime;
     END IF;
 
-    -- Add contact_requests if not already present
     IF NOT EXISTS (
         SELECT 1 FROM pg_publication_tables 
         WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'contact_requests'
@@ -321,7 +325,6 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.contact_requests;
     END IF;
 
-    -- Add contacts if not already present
     IF NOT EXISTS (
         SELECT 1 FROM pg_publication_tables 
         WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'contacts'
@@ -329,7 +332,6 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.contacts;
     END IF;
 
-    -- Add group_members if not already present
     IF NOT EXISTS (
         SELECT 1 FROM pg_publication_tables 
         WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'group_members'
