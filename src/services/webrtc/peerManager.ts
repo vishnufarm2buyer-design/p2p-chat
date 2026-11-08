@@ -250,7 +250,22 @@ class PeerConnectionManager {
     channel.onopen = async () => {
       this.updateStatus(peerUserId, 'connected');
 
-      // Attempt to establish shared AES-256-GCM session key
+      // 1. Immediately exchange device public key in-band over the data channel
+      try {
+        const { publicKeyJWK } = await cryptoService.getOrCreateDeviceKeypair();
+        const keyExchangePacket: WirePacket = {
+          type: 'KEY_EXCHANGE',
+          id: 'key_' + Date.now(),
+          senderId: this.currentUserId!,
+          timestamp: Date.now(),
+          publicKeyJWK
+        };
+        channel.send(JSON.stringify(keyExchangePacket));
+      } catch (err) {
+        console.warn('Could not send initial in-band key exchange:', err);
+      }
+
+      // 2. Attempt to establish shared AES-256-GCM session key
       const session = this.peers.get(peerUserId);
       if (session) {
         if (!session.peerPublicKeyJWK) {
@@ -259,6 +274,7 @@ class PeerConnectionManager {
         if (session.peerPublicKeyJWK) {
           try {
             session.sharedKey = await cryptoService.getOrDeriveSharedKey(peerUserId, session.peerPublicKeyJWK);
+            console.log(`[WebRTC] Initial AES-256-GCM shared key established with ${peerUserId}`);
           } catch (e) {
             console.warn('Could not derive E2EE shared key for peer:', e);
           }
@@ -289,9 +305,36 @@ class PeerConnectionManager {
     const session = this.peers.get(peerUserId);
 
     switch (packet.type) {
+      case 'KEY_EXCHANGE': {
+        if (packet.publicKeyJWK && session) {
+          console.log(`[WebRTC] Received direct in-band public key from ${peerUserId}`);
+          session.peerPublicKeyJWK = packet.publicKeyJWK;
+          try {
+            session.sharedKey = await cryptoService.deriveSharedKeyDirect(packet.publicKeyJWK);
+            console.log(`[WebRTC] Re-derived in-band shared AES-256-GCM key for ${peerUserId}`);
+          } catch (err) {
+            console.warn('Failed to derive shared key from in-band key exchange:', err);
+          }
+        }
+        break;
+      }
+
       case 'CHAT_MESSAGE': {
         let textContent = '';
         let isE2EE = false;
+
+        // In-band public key synchronization: if sender attached their public key, sync our shared key!
+        if (packet.publicKeyJWK && session) {
+          if (!session.sharedKey || session.peerPublicKeyJWK !== packet.publicKeyJWK) {
+            session.peerPublicKeyJWK = packet.publicKeyJWK;
+            try {
+              session.sharedKey = await cryptoService.deriveSharedKeyDirect(packet.publicKeyJWK);
+              console.log(`[WebRTC] Synced in-band shared key for ${peerUserId}`);
+            } catch (err) {
+              console.warn('Failed to sync in-band shared key:', err);
+            }
+          }
+        }
 
         if (packet.ciphertext && packet.iv && session?.sharedKey) {
           try {
@@ -302,10 +345,37 @@ class PeerConnectionManager {
             isE2EE = true;
           } catch (err) {
             console.error('Failed to decrypt incoming text with shared key:', err);
-            textContent = '[Decryption failed]';
+            // Fallback attempt with direct public key re-derivation if attached
+            if (packet.publicKeyJWK) {
+              try {
+                const freshKey = await cryptoService.deriveSharedKeyDirect(packet.publicKeyJWK);
+                textContent = await cryptoService.decryptText(
+                  { ciphertext: packet.ciphertext, iv: packet.iv },
+                  freshKey
+                );
+                session.sharedKey = freshKey;
+                isE2EE = true;
+              } catch (freshErr) {
+                try {
+                  textContent = atob(packet.ciphertext);
+                } catch {
+                  textContent = '[Decryption failed]';
+                }
+              }
+            } else {
+              try {
+                textContent = atob(packet.ciphertext);
+              } catch {
+                textContent = '[Decryption failed]';
+              }
+            }
           }
         } else if (packet.ciphertext) {
-          textContent = atob(packet.ciphertext);
+          try {
+            textContent = atob(packet.ciphertext);
+          } catch {
+            textContent = packet.ciphertext;
+          }
         }
 
         const localMsg: LocalMessage = {
@@ -432,6 +502,22 @@ class PeerConnectionManager {
       throw new Error('Direct P2P DataChannel is not open. Check connectivity status.');
     }
 
+    const { publicKeyJWK } = await cryptoService.getOrCreateDeviceKeypair();
+
+    // Ensure session has peer public key and shared key
+    if (!session.sharedKey) {
+      if (!session.peerPublicKeyJWK) {
+        session.peerPublicKeyJWK = (await supabaseService.getPeerPublicKey(peerUserId)) || null;
+      }
+      if (session.peerPublicKeyJWK) {
+        try {
+          session.sharedKey = await cryptoService.getOrDeriveSharedKey(peerUserId, session.peerPublicKeyJWK);
+        } catch (e) {
+          console.warn('Could not derive key before send:', e);
+        }
+      }
+    }
+
     const messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     let ciphertext = '';
     let iv = '';
@@ -453,7 +539,8 @@ class PeerConnectionManager {
       senderId: this.currentUserId!,
       timestamp: Date.now(),
       ciphertext,
-      iv: iv || undefined
+      iv: iv || undefined,
+      publicKeyJWK
     };
 
     session.dataChannel.send(JSON.stringify(packet));

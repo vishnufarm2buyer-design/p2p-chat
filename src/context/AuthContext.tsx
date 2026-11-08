@@ -75,6 +75,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (localAvatar) user.avatar_data = localAvatar;
           setCurrentUser(user);
           setLoading(false);
+          cryptoService.getOrCreateDeviceKeypair().then(({ publicKeyJWK }) => {
+            supabaseService.publishPublicKey(user.id, publicKeyJWK).catch(console.warn);
+          }).catch(console.warn);
           signalingService.init(user.id, user.public_id, user.display_name).catch(console.warn);
           peerManager.init(user.id, user.display_name);
           groupMeshManager.init(user.id, user.display_name);

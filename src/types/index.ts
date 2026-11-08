@@ -161,6 +161,7 @@ export type DataChannelPacketType =
   | 'CHAT_MESSAGE'
   | 'MESSAGE_ACK'
   | 'TYPING'
+  | 'KEY_EXCHANGE'
   | 'FILE_START'
   | 'FILE_CHUNK'
   | 'FILE_END'
@@ -175,6 +176,7 @@ export interface WirePacket {
   // Encrypted payload fields (AES-GCM):
   ciphertext?: string; // base64
   iv?: string;         // base64 12-byte IV
+  publicKeyJWK?: string; // For instant in-band key exchange and synchronization
   // Cleartext metadata fields for control packets:
   fileMeta?: {
     fileId: string;

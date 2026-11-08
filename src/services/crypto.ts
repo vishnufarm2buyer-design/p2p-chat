@@ -77,7 +77,8 @@ class CryptoService {
    * Derives a shared AES-256-GCM session key with a peer using ECDH.
    */
   async getOrDeriveSharedKey(peerUserId: string, peerPublicKeyJWKStr: string): Promise<CryptoKey> {
-    const cached = this.keyCache.get(peerUserId);
+    const cacheKey = `${peerUserId}:${peerPublicKeyJWKStr}`;
+    const cached = this.keyCache.get(cacheKey);
     if (cached) return cached;
 
     const { privateKey } = await this.getOrCreateDeviceKeypair();
@@ -106,8 +107,36 @@ class CryptoService {
       ['encrypt', 'decrypt']
     );
 
-    this.keyCache.set(peerUserId, sharedKey);
+    this.keyCache.set(cacheKey, sharedKey);
     return sharedKey;
+  }
+
+  /**
+   * Derives a shared AES-256-GCM session key directly from an in-band public key.
+   */
+  async deriveSharedKeyDirect(peerPublicKeyJWKStr: string): Promise<CryptoKey> {
+    const { privateKey } = await this.getOrCreateDeviceKeypair();
+    const peerPublicKey = await crypto.subtle.importKey(
+      'jwk',
+      JSON.parse(peerPublicKeyJWKStr),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    return await crypto.subtle.deriveKey(
+      {
+        name: 'ECDH',
+        public: peerPublicKey
+      },
+      privateKey,
+      {
+        name: 'AES-GCM',
+        length: 256
+      },
+      false,
+      ['encrypt', 'decrypt']
+    );
   }
 
   /**
