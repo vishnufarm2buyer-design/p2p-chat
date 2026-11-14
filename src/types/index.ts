@@ -163,6 +163,7 @@ export type SignalingSignalType =
   | 'offer' 
   | 'answer' 
   | 'ice-candidate' 
+  | 'ice-candidates'
   | 'connect-ping'
   | 'call-invite' 
   | 'call-accept' 
@@ -178,6 +179,7 @@ export interface SignalingPayload {
   sessionId: string;
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  candidates?: RTCIceCandidateInit[];
   callType?: 'voice' | 'video';
   meshGroupId?: string;
   timestamp: number;
@@ -202,7 +204,9 @@ export type DataChannelPacketType =
   | 'AVATAR_SYNC'
   | 'DISAPPEARING_TIMER_UPDATE'
   | 'WHITEBOARD_DATA'
-  | 'GAME_DATA';
+  | 'GAME_DATA'
+  | 'PING'
+  | 'PONG';
 
 export interface WirePacket {
   type: DataChannelPacketType;

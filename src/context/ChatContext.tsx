@@ -153,13 +153,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       refreshRequests();
       refreshGroups();
 
-      // Keep contacts and incoming/outgoing requests continuously synchronized
+      // Keep contacts and incoming/outgoing requests synchronized (rate-optimized for free tier)
       const syncInterval = setInterval(() => {
-        refreshContacts();
-        refreshRequests();
-      }, 2500);
+        if (document.visibilityState === 'visible') {
+          refreshContacts();
+          refreshRequests();
+        }
+      }, 15000);
 
-      return () => clearInterval(syncInterval);
+      // Instant refresh when user returns to tab
+      const onTabFocus = () => {
+        if (document.visibilityState === 'visible') {
+          refreshContacts();
+          refreshRequests();
+        }
+      };
+      document.addEventListener('visibilitychange', onTabFocus);
+
+      return () => {
+        clearInterval(syncInterval);
+        document.removeEventListener('visibilitychange', onTabFocus);
+      };
     }
   }, [currentUser, refreshContacts, refreshRequests, refreshGroups]);
 
@@ -189,9 +203,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    // P2P Status updates
+    // P2P Status updates (Direct WebRTC bypasses server presence)
     const unbindStatus = peerManager.onPeerStatusChange((peerId, status, errorReason) => {
       setPeerStatuses(prev => ({ ...prev, [peerId]: status }));
+      if (status === 'connected') {
+        setOnlineUsers(prev => new Set(prev).add(peerId));
+      }
       if (errorReason) {
         setPeerErrors(prev => ({ ...prev, [peerId]: errorReason }));
       }
