@@ -70,8 +70,105 @@ export class P2PChatDatabase extends Dexie {
       .sortBy('timestamp');
   }
 
+  async getConversation(conversationId: string): Promise<LocalConversation | undefined> {
+    return await this.conversations.get(conversationId);
+  }
+
   async updateMessageStatus(id: string, status: LocalMessage['status']): Promise<void> {
     await this.messages.update(id, { status });
+  }
+
+  async markMessagesAsRead(messageIds: string[]): Promise<void> {
+    await this.transaction('rw', this.messages, async () => {
+      for (const id of messageIds) {
+        await this.messages.update(id, { status: 'read' });
+      }
+    });
+  }
+
+  async addReaction(messageId: string, emoji: string, userId: string): Promise<Record<string, string[]>> {
+    const msg = await this.messages.get(messageId);
+    if (!msg) return {};
+
+    const reactions = { ...(msg.reactions || {}) };
+    const userList = new Set(reactions[emoji] || []);
+
+    if (userList.has(userId)) {
+      userList.delete(userId);
+    } else {
+      userList.add(userId);
+    }
+
+    if (userList.size === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = Array.from(userList);
+    }
+
+    await this.messages.update(messageId, { reactions });
+    return reactions;
+  }
+
+  async editMessage(messageId: string, newContent: string, editedAt: number): Promise<void> {
+    await this.messages.update(messageId, {
+      content: newContent,
+      isEdited: true,
+      editedAt
+    });
+  }
+
+  async burnViewOnceMessage(messageId: string): Promise<void> {
+    const msg = await this.messages.get(messageId);
+    if (!msg) return;
+
+    await this.messages.update(messageId, {
+      isViewed: true,
+      content: '🔥 View-once media expired',
+      fileMetadata: undefined
+    });
+  }
+
+  async purgeExpiredMessages(): Promise<number> {
+    const now = Date.now();
+    const expired = await this.messages
+      .filter(m => !!m.expiresAt && m.expiresAt <= now)
+      .toArray();
+
+    if (expired.length > 0) {
+      const ids = expired.map(m => m.id);
+      await this.messages.bulkDelete(ids);
+    }
+    return expired.length;
+  }
+
+  async searchMessages(query: string, conversationId?: string): Promise<LocalMessage[]> {
+    const q = query.toLowerCase().trim();
+    if (!q) return [];
+
+    let collection = this.messages.toCollection();
+    if (conversationId) {
+      collection = this.messages.where('conversationId').equals(conversationId);
+    }
+
+    return await collection
+      .filter(m => m.content.toLowerCase().includes(q))
+      .sortBy('timestamp');
+  }
+
+  async setConversationDisappearingTimer(conversationId: string, seconds: number): Promise<void> {
+    await this.conversations.update(conversationId, { disappearingTimer: seconds });
+  }
+
+  async togglePinConversation(conversationId: string): Promise<boolean> {
+    const conv = await this.conversations.get(conversationId);
+    if (!conv) return false;
+    const isPinned = !conv.isPinned;
+    await this.conversations.update(conversationId, { isPinned });
+    return isPinned;
+  }
+
+  async saveConversationDraft(conversationId: string, draftText: string): Promise<void> {
+    await this.conversations.update(conversationId, { draftText });
   }
 
   async getQueuedMessages(conversationId: string): Promise<LocalMessage[]> {

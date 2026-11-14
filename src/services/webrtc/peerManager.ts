@@ -4,12 +4,16 @@ import { cryptoService } from '../crypto';
 import { chunkerService, type TransferProgressCallback } from './dataChannelChunker';
 import { localDb } from '../db';
 import { supabaseService } from '../supabase';
+import { soundEngine } from '../audio';
+import { notificationService } from '../notifications';
 import type { 
   PeerConnectionStatus, 
   SignalingPayload, 
   WirePacket, 
   LocalMessage,
-  ActiveCallState
+  ActiveCallState,
+  QuotedMessage,
+  MessageType
 } from '@/types';
 
 // ============================================================================
@@ -26,6 +30,8 @@ export type MessageReceivedHandler = (message: LocalMessage) => void;
 export type TypingChangeHandler = (peerUserId: string, isTyping: boolean) => void;
 export type CallStateChangeHandler = (callState: ActiveCallState) => void;
 export type RemoteStreamHandler = (peerUserId: string, stream: MediaStream) => void;
+export type WhiteboardEventHandler = (peerUserId: string, payload: any) => void;
+export type GameEventHandler = (peerUserId: string, payload: any) => void;
 
 interface PeerSession {
   peerUserId: string;
@@ -67,6 +73,8 @@ class PeerConnectionManager {
   private callListeners: Set<CallStateChangeHandler> = new Set();
   private streamListeners: Set<RemoteStreamHandler> = new Set();
   private fileProgressListeners: Map<string, TransferProgressCallback> = new Map();
+  private whiteboardListeners: Set<WhiteboardEventHandler> = new Set();
+  private gameListeners: Set<GameEventHandler> = new Set();
 
   // Screen WakeLock & Screen Sharing
   private wakeLock: any = null;
@@ -494,13 +502,45 @@ class PeerConnectionManager {
           }
         }
 
+        let parsedContent = textContent;
+        let messageType: MessageType = 'text';
+        let replyTo: QuotedMessage | undefined = undefined;
+        let viewOnce: boolean | undefined = undefined;
+        let expiresAt: number | undefined = undefined;
+        let audioWaveform: number[] | undefined = undefined;
+        let durationSeconds: number | undefined = undefined;
+
+        try {
+          const parsed = JSON.parse(textContent);
+          if (parsed && typeof parsed === 'object') {
+            if ('text' in parsed) parsedContent = parsed.text;
+            if ('type' in parsed) messageType = parsed.type;
+            if ('replyTo' in parsed) replyTo = parsed.replyTo;
+            if ('viewOnce' in parsed) viewOnce = parsed.viewOnce;
+            if ('expiresAt' in parsed) expiresAt = parsed.expiresAt;
+            if ('waveform' in parsed) audioWaveform = parsed.waveform;
+            if ('durationSeconds' in parsed) durationSeconds = parsed.durationSeconds;
+          }
+        } catch (_) {}
+
         const localMsg: LocalMessage = {
           id: packet.id,
           conversationId: peerUserId,
           senderId: peerUserId,
           senderName: 'Contact',
-          type: 'text',
-          content: textContent,
+          type: messageType,
+          content: parsedContent,
+          replyTo,
+          viewOnce,
+          expiresAt,
+          fileMetadata: audioWaveform ? {
+            id: packet.id,
+            name: 'Voice Memo',
+            size: 0,
+            mimeType: 'audio/webm',
+            waveform: audioWaveform,
+            durationSeconds
+          } : undefined,
           status: 'delivered',
           timestamp: packet.timestamp,
           isE2EE
@@ -508,6 +548,10 @@ class PeerConnectionManager {
 
         // Save directly to local IndexedDB (never sent to server!)
         await localDb.saveMessage(localMsg);
+
+        // Sound & Notification feedback
+        soundEngine.playMessageIncomingChime();
+        notificationService.notifyIncomingMessage(localMsg.senderName, localMsg.content, peerUserId);
 
         // Send ACK back so sender gets delivery confirmation (double checkmark ✓✓)
         if (session?.dataChannel?.readyState === 'open') {
@@ -523,6 +567,85 @@ class PeerConnectionManager {
         // Notify UI listeners
         for (const listener of this.messageListeners) {
           listener(localMsg);
+        }
+        break;
+      }
+
+      case 'MESSAGE_READ': {
+        if (packet.readMessageIds && packet.readMessageIds.length > 0) {
+          await localDb.markMessagesAsRead(packet.readMessageIds);
+          for (const id of packet.readMessageIds) {
+            const msg = await localDb.messages.get(id);
+            if (msg) {
+              for (const listener of this.messageListeners) {
+                listener({ ...msg, status: 'read' });
+              }
+            }
+          }
+        }
+        break;
+      }
+
+      case 'MESSAGE_REACTION': {
+        if (packet.reaction) {
+          const { messageId, emoji, userId } = packet.reaction;
+          const reactions = await localDb.addReaction(messageId, emoji, userId);
+          const msg = await localDb.messages.get(messageId);
+          if (msg) {
+            for (const listener of this.messageListeners) {
+              listener({ ...msg, reactions });
+            }
+          }
+        }
+        break;
+      }
+
+      case 'MESSAGE_EDIT': {
+        if (packet.editPayload) {
+          const { messageId, newContent, editedAt } = packet.editPayload;
+          await localDb.editMessage(messageId, newContent, editedAt);
+          const msg = await localDb.messages.get(messageId);
+          if (msg) {
+            for (const listener of this.messageListeners) {
+              listener({ ...msg, content: newContent, isEdited: true, editedAt });
+            }
+          }
+        }
+        break;
+      }
+
+      case 'MESSAGE_DELETE': {
+        if (packet.deletePayload) {
+          const { messageId } = packet.deletePayload;
+          await localDb.deleteMessage(messageId);
+          for (const listener of this.messageListeners) {
+            listener({ id: messageId, isDeleted: true } as any);
+          }
+        }
+        break;
+      }
+
+      case 'DISAPPEARING_TIMER_UPDATE': {
+        if (packet.disappearingTimer !== undefined) {
+          await localDb.setConversationDisappearingTimer(peerUserId, packet.disappearingTimer);
+        }
+        break;
+      }
+
+      case 'WHITEBOARD_DATA': {
+        if (packet.whiteboardPayload) {
+          for (const listener of this.whiteboardListeners) {
+            listener(peerUserId, packet.whiteboardPayload);
+          }
+        }
+        break;
+      }
+
+      case 'GAME_DATA': {
+        if (packet.gamePayload) {
+          for (const listener of this.gameListeners) {
+            listener(peerUserId, packet.gamePayload);
+          }
         }
         break;
       }
@@ -636,8 +759,30 @@ class PeerConnectionManager {
   /**
    * Sends a direct encrypted chat message to a peer over RTCDataChannel.
    */
-  async sendMessage(peerUserId: string, content: string): Promise<LocalMessage> {
+  async sendMessage(
+    peerUserId: string, 
+    content: string, 
+    options?: {
+      type?: MessageType;
+      replyTo?: QuotedMessage;
+      viewOnce?: boolean;
+      waveform?: number[];
+      durationSeconds?: number;
+      expiresAt?: number;
+    }
+  ): Promise<LocalMessage> {
     const session = await this.ensureConnectedSession(peerUserId);
+
+    // Compute automatic disappearing expiration if set
+    let expiresAt = options?.expiresAt;
+    if (!expiresAt) {
+      const conv = await localDb.getConversation(peerUserId);
+      if (conv?.disappearingTimer && conv.disappearingTimer > 0) {
+        expiresAt = Date.now() + conv.disappearingTimer * 1000;
+      }
+    }
+
+    const msgType: MessageType = options?.type || 'text';
 
     // If channel is not currently open, queue in local IndexedDB outbox
     if (!session.dataChannel || session.dataChannel.readyState !== 'open') {
@@ -647,8 +792,19 @@ class PeerConnectionManager {
         conversationId: peerUserId,
         senderId: this.currentUserId!,
         senderName: this.currentUserName,
-        type: 'text',
+        type: msgType,
         content,
+        replyTo: options?.replyTo,
+        viewOnce: options?.viewOnce,
+        expiresAt,
+        fileMetadata: options?.waveform ? {
+          id: messageId,
+          name: 'Voice Memo',
+          size: 0,
+          mimeType: 'audio/webm',
+          waveform: options.waveform,
+          durationSeconds: options.durationSeconds
+        } : undefined,
         status: 'queued',
         timestamp: Date.now(),
         isE2EE: true
@@ -685,14 +841,25 @@ class PeerConnectionManager {
     let iv = '';
     let isE2EE = false;
 
+    // Rich payload encapsulating text and metadata
+    const rawPayload = JSON.stringify({
+      text: content,
+      type: msgType,
+      replyTo: options?.replyTo,
+      viewOnce: options?.viewOnce,
+      expiresAt,
+      waveform: options?.waveform,
+      durationSeconds: options?.durationSeconds
+    });
+
     // Encrypt with AES-256-GCM if sharedKey available
     if (session.sharedKey) {
-      const encrypted = await cryptoService.encryptText(content, session.sharedKey);
+      const encrypted = await cryptoService.encryptText(rawPayload, session.sharedKey);
       ciphertext = encrypted.ciphertext;
       iv = encrypted.iv;
       isE2EE = true;
     } else {
-      ciphertext = btoa(content);
+      ciphertext = btoa(rawPayload);
     }
 
     const packet: WirePacket = {
@@ -712,8 +879,19 @@ class PeerConnectionManager {
       conversationId: peerUserId,
       senderId: this.currentUserId!,
       senderName: this.currentUserName,
-      type: 'text',
+      type: msgType,
       content,
+      replyTo: options?.replyTo,
+      viewOnce: options?.viewOnce,
+      expiresAt,
+      fileMetadata: options?.waveform ? {
+        id: messageId,
+        name: 'Voice Memo',
+        size: 0,
+        mimeType: 'audio/webm',
+        waveform: options.waveform,
+        durationSeconds: options.durationSeconds
+      } : undefined,
       status: 'sent',
       timestamp: packet.timestamp,
       isE2EE
@@ -721,6 +899,157 @@ class PeerConnectionManager {
 
     await localDb.saveMessage(localMsg);
     return localMsg;
+  }
+
+  /**
+   * Sends an emoji reaction to a message.
+   */
+  async sendReaction(peerUserId: string, messageId: string, emoji: string): Promise<void> {
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'MESSAGE_REACTION',
+        id: 'react_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        reaction: { messageId, emoji, userId: this.currentUserId! }
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+    const reactions = await localDb.addReaction(messageId, emoji, this.currentUserId!);
+    const msg = await localDb.messages.get(messageId);
+    if (msg) {
+      for (const listener of this.messageListeners) {
+        listener({ ...msg, reactions });
+      }
+    }
+  }
+
+  /**
+   * Edits a sent message and notifies peer.
+   */
+  async editMessage(peerUserId: string, messageId: string, newContent: string): Promise<void> {
+    const session = this.peers.get(peerUserId);
+    const now = Date.now();
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'MESSAGE_EDIT',
+        id: 'edit_' + now,
+        senderId: this.currentUserId!,
+        timestamp: now,
+        editPayload: { messageId, newContent, editedAt: now }
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+    await localDb.editMessage(messageId, newContent, now);
+    const msg = await localDb.messages.get(messageId);
+    if (msg) {
+      for (const listener of this.messageListeners) {
+        listener({ ...msg, content: newContent, isEdited: true, editedAt: now });
+      }
+    }
+  }
+
+  /**
+   * Deletes a message for everyone.
+   */
+  async deleteMessageForEveryone(peerUserId: string, messageId: string): Promise<void> {
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'MESSAGE_DELETE',
+        id: 'del_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        deletePayload: { messageId }
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+    await localDb.deleteMessage(messageId);
+    for (const listener of this.messageListeners) {
+      listener({ id: messageId, isDeleted: true } as any);
+    }
+  }
+
+  /**
+   * Marks a list of messages as read and informs peer.
+   */
+  async markMessagesAsRead(peerUserId: string, messageIds: string[]): Promise<void> {
+    if (!messageIds || messageIds.length === 0) return;
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'MESSAGE_READ',
+        id: 'read_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        readMessageIds: messageIds
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+    await localDb.markMessagesAsRead(messageIds);
+  }
+
+  /**
+   * Updates disappearing message timer for the conversation.
+   */
+  async setDisappearingTimer(peerUserId: string, timerSeconds: number): Promise<void> {
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'DISAPPEARING_TIMER_UPDATE',
+        id: 'timer_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        disappearingTimer: timerSeconds
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+    await localDb.setConversationDisappearingTimer(peerUserId, timerSeconds);
+  }
+
+  /**
+   * Broadcasts whiteboard canvas sync packet.
+   */
+  sendWhiteboardData(peerUserId: string, payload: any): void {
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'WHITEBOARD_DATA',
+        id: 'wb_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        whiteboardPayload: payload
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+  }
+
+  /**
+   * Broadcasts mini-game state packet.
+   */
+  sendGameData(peerUserId: string, payload: any): void {
+    const session = this.peers.get(peerUserId);
+    if (session?.dataChannel?.readyState === 'open') {
+      const packet: WirePacket = {
+        type: 'GAME_DATA',
+        id: 'game_' + Date.now(),
+        senderId: this.currentUserId!,
+        timestamp: Date.now(),
+        gamePayload: payload
+      };
+      session.dataChannel.send(JSON.stringify(packet));
+    }
+  }
+
+  onWhiteboardData(handler: WhiteboardEventHandler): () => void {
+    this.whiteboardListeners.add(handler);
+    return () => this.whiteboardListeners.delete(handler);
+  }
+
+  onGameData(handler: GameEventHandler): () => void {
+    this.gameListeners.add(handler);
+    return () => this.gameListeners.delete(handler);
   }
 
   /**
@@ -905,6 +1234,9 @@ class PeerConnectionManager {
     };
     this.notifyCallStateChange();
 
+    // Start outgoing ringback audio cue
+    soundEngine.startOutgoingRingbackTone();
+
     // 2. Connect or attach tracks to peer connection
     let session = this.peers.get(peerUserId);
     if (!session || session.status === 'failed' || session.status === 'disconnected') {
@@ -937,6 +1269,9 @@ class PeerConnectionManager {
 
   async acceptCall(callType?: 'voice' | 'video'): Promise<void> {
     if (!this.activeCall.active || !this.activeCall.remoteUserId) return;
+
+    soundEngine.stopOutgoingRingbackTone();
+    soundEngine.playCallConnected();
 
     const actualType = callType || this.activeCall.callType;
     const remoteId = this.activeCall.remoteUserId;
@@ -986,6 +1321,7 @@ class PeerConnectionManager {
   }
 
   async rejectCall(): Promise<void> {
+    soundEngine.stopOutgoingRingbackTone();
     if (this.activeCall.active && this.activeCall.remoteUserId) {
       await signalingService.sendSignal({
         type: 'call-reject',
@@ -999,6 +1335,7 @@ class PeerConnectionManager {
   }
 
   endCall(): void {
+    soundEngine.stopOutgoingRingbackTone();
     if (this.activeCall.active && this.activeCall.remoteUserId) {
       signalingService.sendSignal({
         type: 'call-end',
@@ -1382,22 +1719,26 @@ class PeerConnectionManager {
         }
 
         const senderProfile = await supabaseService.getProfile(peerUserId);
+        const contactName = senderProfile?.display_name || 'Contact';
         this.activeCall = {
           active: true,
           callType: payload.callType || 'voice',
           isIncoming: true,
           remoteUserId: peerUserId,
-          remoteUserName: senderProfile?.display_name || 'Contact',
+          remoteUserName: contactName,
           status: 'ringing',
           isMuted: false,
           isVideoOff: false
         };
         this.notifyCallStateChange();
+        notificationService.notifyIncomingCall(contactName, payload.callType || 'voice');
         break;
       }
 
       case 'call-accept': {
         if (this.activeCall.active && this.activeCall.remoteUserId === peerUserId) {
+          soundEngine.stopOutgoingRingbackTone();
+          soundEngine.playCallConnected();
           this.activeCall.status = 'connected';
           this.activeCall.startedAt = Date.now();
           this.notifyCallStateChange();
@@ -1625,6 +1966,7 @@ class PeerConnectionManager {
   }
 
   cleanup(): void {
+    soundEngine.stopOutgoingRingbackTone();
     this.endCall();
     for (const [peerId] of this.watchdogTimers) {
       this.clearWatchdog(peerId);
@@ -1638,6 +1980,8 @@ class PeerConnectionManager {
     this.typingListeners.clear();
     this.callListeners.clear();
     this.streamListeners.clear();
+    this.whiteboardListeners.clear();
+    this.gameListeners.clear();
   }
 }
 

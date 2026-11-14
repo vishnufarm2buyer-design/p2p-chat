@@ -19,12 +19,15 @@ import {
   X,
   Plus,
   Lock,
-  Database
+  Database,
+  Pin,
+  KeyRound
 } from 'lucide-react';
 import type { LocalConversation } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useChat } from '@/context/ChatContext';
 import { localDb } from '@/services/db';
+import { securityService } from '@/services/security';
 
 interface SidebarProps {
   onOpenProfile: () => void;
@@ -34,6 +37,7 @@ interface SidebarProps {
   onOpenDiagnostics: () => void;
   onOpenCreateGroup: () => void;
   onOpenBackup: () => void;
+  onOpenSecuritySettings?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenDiagnostics,
   onOpenCreateGroup,
   onOpenBackup,
+  onOpenSecuritySettings,
 }) => {
   const { currentUser, signOut } = useAuth();
   const {
@@ -582,6 +587,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {blockedUsers.length > 0 && (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-pulse" />
             )}
+          </button>
+
+          {/* App Lock & Stealth Settings */}
+          {onOpenSecuritySettings && (
+            <button
+              onClick={onOpenSecuritySettings}
+              title="PIN Lock & Plausible Deniability Settings"
+              className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-white/[0.06] rounded-xl transition-colors cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Quick Lock Button */}
+          <button
+            onClick={() => securityService.lockApp()}
+            title="Lock Shield App Immediately"
+            className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-xl transition-colors cursor-pointer"
+          >
+            <Lock className="w-4 h-4" />
           </button>
 
           {/* Sign Out */}

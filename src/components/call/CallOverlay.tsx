@@ -9,7 +9,8 @@ import {
   Volume2,
   SwitchCamera,
   Monitor,
-  ShieldCheck
+  ShieldCheck,
+  Maximize2
 } from 'lucide-react';
 import { useChat } from '@/context/ChatContext';
 
@@ -115,6 +116,20 @@ export const CallOverlay: React.FC = () => {
 
   const handleToggleScreenShare = async () => {
     await toggleScreenShare();
+  };
+
+  const handleTogglePiP = async () => {
+    try {
+      if (remoteVideoRef.current && document.pictureInPictureEnabled) {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await remoteVideoRef.current.requestPictureInPicture();
+        }
+      }
+    } catch (err) {
+      console.warn('PiP error:', err);
+    }
   };
 
   const formatDuration = (sec: number) => {
@@ -286,6 +301,17 @@ export const CallOverlay: React.FC = () => {
               title="Toggle Screen Sharing"
             >
               <Monitor className="w-5 h-5 text-sky-400" />
+            </button>
+          )}
+
+          {/* Picture in Picture Button */}
+          {isVideo && typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && (
+            <button
+              onClick={handleTogglePiP}
+              className="p-3.5 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all cursor-pointer"
+              title="Picture in Picture Mode"
+            >
+              <Maximize2 className="w-5 h-5 text-cyan-400" />
             </button>
           )}
 

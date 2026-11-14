@@ -72,8 +72,17 @@ export interface GroupMemberItem {
 // ----------------------------------------------------------------------------
 // Local Storage (IndexedDB / Dexie.js) Types
 // ----------------------------------------------------------------------------
-export type MessageType = 'text' | 'file' | 'system' | 'call_log';
-export type MessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
+export type MessageType = 
+  | 'text' 
+  | 'file' 
+  | 'voice_note' 
+  | 'video_note' 
+  | 'system' 
+  | 'call_log' 
+  | 'whiteboard' 
+  | 'game';
+
+export type MessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
 export interface FileMetadata {
   id: string;
@@ -82,6 +91,8 @@ export interface FileMetadata {
   mimeType: string;
   dataBlob?: Blob;
   blobUrl?: string;
+  waveform?: number[];
+  durationSeconds?: number;
 }
 
 export interface CallLogMetadata {
@@ -90,15 +101,29 @@ export interface CallLogMetadata {
   durationSeconds?: number;
 }
 
+export interface QuotedMessage {
+  id: string;
+  senderName: string;
+  content: string;
+  type: MessageType;
+}
+
 export interface LocalMessage {
   id: string;
   conversationId: string; // recipient user_id or group_id
   senderId: string;
   senderName: string;
   type: MessageType;
-  content: string; // Plain text or file caption
+  content: string; // Plain text or caption
   fileMetadata?: FileMetadata;
   callMetadata?: CallLogMetadata;
+  replyTo?: QuotedMessage;
+  reactions?: Record<string, string[]>; // emoji -> array of userIds
+  viewOnce?: boolean;
+  isViewed?: boolean;
+  expiresAt?: number; // Timestamp when message self-destructs
+  isEdited?: boolean;
+  editedAt?: number;
   status: MessageStatus;
   timestamp: number;
   isE2EE: boolean;
@@ -111,6 +136,9 @@ export interface LocalConversation {
   lastMessageText: string;
   lastMessageTimestamp: number;
   unreadCount: number;
+  disappearingTimer?: number; // 0 = off, seconds TTL (30, 300, 3600, 86400, 604800)
+  isPinned?: boolean;
+  draftText?: string;
 }
 
 export interface CachedPeerData {
@@ -161,13 +189,20 @@ export interface SignalingPayload {
 export type DataChannelPacketType = 
   | 'CHAT_MESSAGE'
   | 'MESSAGE_ACK'
+  | 'MESSAGE_READ'
+  | 'MESSAGE_REACTION'
+  | 'MESSAGE_EDIT'
+  | 'MESSAGE_DELETE'
   | 'TYPING'
   | 'KEY_EXCHANGE'
   | 'FILE_START'
   | 'FILE_CHUNK'
   | 'FILE_END'
   | 'FILE_CANCEL'
-  | 'AVATAR_SYNC';
+  | 'AVATAR_SYNC'
+  | 'DISAPPEARING_TIMER_UPDATE'
+  | 'WHITEBOARD_DATA'
+  | 'GAME_DATA';
 
 export interface WirePacket {
   type: DataChannelPacketType;
@@ -176,6 +211,36 @@ export interface WirePacket {
   timestamp: number;
   ackMessageId?: string; // For MESSAGE_ACK
   sha256Hash?: string;   // For FILE_END verification
+  readMessageIds?: string[]; // For MESSAGE_READ
+  reaction?: {
+    messageId: string;
+    emoji: string;
+    userId: string;
+  };
+  editPayload?: {
+    messageId: string;
+    newContent: string;
+    editedAt: number;
+  };
+  deletePayload?: {
+    messageId: string;
+  };
+  disappearingTimer?: number;
+  whiteboardPayload?: {
+    action: 'draw' | 'clear';
+    stroke?: {
+      color: string;
+      size: number;
+      points: { x: number; y: number }[];
+    };
+  };
+  gamePayload?: {
+    gameType: 'tictactoe';
+    action: 'invite' | 'accept' | 'move' | 'reset';
+    board?: (string | null)[];
+    turn?: string;
+    winner?: string | null;
+  };
   // Encrypted payload fields (AES-GCM):
   ciphertext?: string; // base64
   iv?: string;         // base64 12-byte IV
@@ -208,4 +273,16 @@ export interface ActiveCallState {
   startedAt?: number;
   isMuted: boolean;
   isVideoOff: boolean;
+}
+
+export interface AppSecuritySettings {
+  isLocked: boolean;
+  hasPin: boolean;
+  pinHash?: string;
+  pinSalt?: string;
+  decoyPinHash?: string;
+  biometricEnabled?: boolean;
+  autoLockMinutes: number; // 0 = immediate on blur/close
+  incognitoRamMode?: boolean;
+  lastActiveTimestamp: number;
 }

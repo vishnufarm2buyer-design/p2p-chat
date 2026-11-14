@@ -14,6 +14,9 @@ import { NetworkDiagnosticsModal } from '@/components/diagnostics/NetworkDiagnos
 import { BackupModal } from '@/components/backup/BackupModal';
 import { IncomingCallDialog } from '@/components/call/IncomingCallDialog';
 import { CallOverlay } from '@/components/call/CallOverlay';
+import { SecurityLockModal } from '@/components/security/SecurityLockModal';
+import { SecuritySettingsModal } from '@/components/security/SecuritySettingsModal';
+import { securityService } from '@/services/security';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,6 +37,23 @@ const Dashboard: React.FC = () => {
   const [isPrivacyOpen,     setIsPrivacyOpen]     = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isBackupOpen,      setIsBackupOpen]      = useState(false);
+  const [isSecuritySettingsOpen, setIsSecuritySettingsOpen] = useState(false);
+  const [lockMode, setLockMode] = useState<'unlocked' | 'locked' | 'decoy'>('unlocked');
+
+  // App Lock State listener & Auto-Lock on startup
+  useEffect(() => {
+    securityService.getSettings().then((s) => {
+      if (s.hasPin) {
+        securityService.lockApp();
+      }
+    });
+
+    const unbind = securityService.onLockStateChange((mode) => {
+      setLockMode(mode);
+    });
+
+    return () => unbind();
+  }, []);
 
   // Detect mobile viewport
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -52,6 +72,7 @@ const Dashboard: React.FC = () => {
     onOpenDiagnostics: () => setIsDiagnosticsOpen(true),
     onOpenCreateGroup: () => setIsCreateGroupOpen(true),
     onOpenBackup:      () => setIsBackupOpen(true),
+    onOpenSecuritySettings: () => setIsSecuritySettingsOpen(true),
   };
 
   const chatOpen = selectedChat !== null;
@@ -104,10 +125,18 @@ const Dashboard: React.FC = () => {
       <PrivacyModal         isOpen={isPrivacyOpen}     onClose={() => setIsPrivacyOpen(false)} />
       <NetworkDiagnosticsModal isOpen={isDiagnosticsOpen} onClose={() => setIsDiagnosticsOpen(false)} />
       <BackupModal          isOpen={isBackupOpen}      onClose={() => setIsBackupOpen(false)} />
+      {isSecuritySettingsOpen && (
+        <SecuritySettingsModal onClose={() => setIsSecuritySettingsOpen(false)} />
+      )}
 
       {/* ── Calling overlays ──────────────────────────────────────────────────── */}
       <IncomingCallDialog />
       <CallOverlay />
+
+      {/* ── Security PIN App Lock Gateway ─────────────────────────────────────── */}
+      {lockMode === 'locked' && (
+        <SecurityLockModal onUnlocked={() => setLockMode('unlocked')} />
+      )}
     </div>
   );
 };

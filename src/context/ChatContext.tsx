@@ -60,8 +60,25 @@ interface ChatContextType {
   unblockContact: (contactId: string) => Promise<boolean>;
   blockedUsers: string[];
   createGroup: (name: string, memberIds: string[]) => Promise<GroupItem | null>;
-  sendMessage: (content: string) => Promise<LocalMessage | null>;
+  sendMessage: (
+    content: string, 
+    options?: {
+      type?: import('@/types').MessageType;
+      replyTo?: import('@/types').QuotedMessage;
+      viewOnce?: boolean;
+      waveform?: number[];
+      durationSeconds?: number;
+      expiresAt?: number;
+    }
+  ) => Promise<LocalMessage | null>;
   sendFile: (file: File) => Promise<LocalMessage | null>;
+  sendReaction: (messageId: string, emoji: string) => Promise<void>;
+  editMessage: (messageId: string, newContent: string) => Promise<void>;
+  deleteMessageForEveryone: (messageId: string) => Promise<void>;
+  markMessagesAsRead: (messageIds: string[]) => Promise<void>;
+  setDisappearingTimer: (timerSeconds: number) => Promise<void>;
+  sendWhiteboardData: (payload: any) => void;
+  sendGameData: (payload: any) => void;
   sendTyping: (isTyping: boolean) => void;
   retryPeerConnection: (peerUserId: string) => Promise<void>;
   
@@ -270,14 +287,32 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSelectedChat(null);
   }, []);
 
+  // Periodic cleanup of expired disappearing messages
+  useEffect(() => {
+    const purgeTimer = setInterval(() => {
+      localDb.purgeExpiredMessages().catch(console.warn);
+    }, 10000);
+    return () => clearInterval(purgeTimer);
+  }, []);
+
   // --------------------------------------------------------------------------
   // Message & File Actions
   // --------------------------------------------------------------------------
-  const sendMessage = useCallback(async (content: string): Promise<LocalMessage | null> => {
+  const sendMessage = useCallback(async (
+    content: string, 
+    options?: {
+      type?: import('@/types').MessageType;
+      replyTo?: import('@/types').QuotedMessage;
+      viewOnce?: boolean;
+      waveform?: number[];
+      durationSeconds?: number;
+      expiresAt?: number;
+    }
+  ): Promise<LocalMessage | null> => {
     if (!selectedChat) return null;
 
     if (selectedChat.type === 'direct') {
-      return await peerManager.sendMessage(selectedChat.id, content);
+      return await peerManager.sendMessage(selectedChat.id, content, options);
     } else {
       return await groupMeshManager.sendGroupMessage(selectedChat.id, content);
     }
@@ -290,6 +325,48 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return await peerManager.sendFile(selectedChat.id, file);
     } else {
       return await groupMeshManager.sendGroupFile(selectedChat.id, file);
+    }
+  }, [selectedChat]);
+
+  const sendReaction = useCallback(async (messageId: string, emoji: string): Promise<void> => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      await peerManager.sendReaction(selectedChat.id, messageId, emoji);
+    }
+  }, [selectedChat]);
+
+  const editMessage = useCallback(async (messageId: string, newContent: string): Promise<void> => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      await peerManager.editMessage(selectedChat.id, messageId, newContent);
+    }
+  }, [selectedChat]);
+
+  const deleteMessageForEveryone = useCallback(async (messageId: string): Promise<void> => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      await peerManager.deleteMessageForEveryone(selectedChat.id, messageId);
+    }
+  }, [selectedChat]);
+
+  const markMessagesAsRead = useCallback(async (messageIds: string[]): Promise<void> => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      await peerManager.markMessagesAsRead(selectedChat.id, messageIds);
+    }
+  }, [selectedChat]);
+
+  const setDisappearingTimer = useCallback(async (timerSeconds: number): Promise<void> => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      await peerManager.setDisappearingTimer(selectedChat.id, timerSeconds);
+    }
+  }, [selectedChat]);
+
+  const sendWhiteboardData = useCallback((payload: any): void => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      peerManager.sendWhiteboardData(selectedChat.id, payload);
+    }
+  }, [selectedChat]);
+
+  const sendGameData = useCallback((payload: any): void => {
+    if (selectedChat && selectedChat.type === 'direct') {
+      peerManager.sendGameData(selectedChat.id, payload);
     }
   }, [selectedChat]);
 
@@ -469,6 +546,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createGroup,
       sendMessage,
       sendFile,
+      sendReaction,
+      editMessage,
+      deleteMessageForEveryone,
+      markMessagesAsRead,
+      setDisappearingTimer,
+      sendWhiteboardData,
+      sendGameData,
       sendTyping,
       retryPeerConnection,
       startCall,
